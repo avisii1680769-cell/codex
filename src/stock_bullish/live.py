@@ -31,6 +31,9 @@ LIVE_COLUMNS = [
     "现金流分析",
     "行业景气分析",
     "公告新闻风险",
+    "风险等级",
+    "支持证据",
+    "反对证据",
     "入选理由",
 ]
 CACHE_PATH = Path("outputs/live-web/latest_spot.csv")
@@ -295,6 +298,7 @@ def rank_live_candidates(spot: pd.DataFrame, limit: int = 20) -> dict[str, pd.Da
         return {period: pd.DataFrame(columns=LIVE_COLUMNS) for period in PERIODS}
 
     df = _normalize_spot(spot)
+    df = _add_industry_proxy(df)
     return {
         "短期": _rank_period(df, "短期", *_short_scores(df), limit),
         "中期": _rank_period(df, "中期", *_mid_scores(df), limit),
@@ -405,7 +409,12 @@ def _rank_period(
     result["负债分析"] = result.apply(_debt_analysis, axis=1)
     result["现金流分析"] = result.apply(_cashflow_analysis, axis=1)
     result["行业景气分析"] = result.apply(_industry_analysis, axis=1)
-    result["公告新闻风险"] = "公告/新闻风险：等待近期公告抓取。"
+    if "公告新闻风险" not in result.columns:
+        result["公告新闻风险"] = "公告/新闻风险：等待近期公告抓取。"
+    if "风险等级" not in result.columns:
+        result["风险等级"] = "待核查"
+    result["支持证据"] = result.apply(_support_evidence, axis=1)
+    result["反对证据"] = result.apply(_opposition_evidence, axis=1)
     result["入选理由"] = result.apply(lambda row: _reason(row, period), axis=1)
     result = result[result["评分"] > 0].sort_values("评分", ascending=False).head(limit).copy()
     result["排名"] = range(1, len(result) + 1)
@@ -508,7 +517,82 @@ def _industry_analysis(row: pd.Series) -> str:
     industry = row.get("行业", "")
     if not industry:
         return "行业景气：未取得可靠行业数据，暂不做景气判断。"
-    return f"行业景气：所属行业为 {industry}；当前版本仅识别行业归属，尚未接入行业景气指数。"
+    sample_count = int(row.get("行业样本数", 0) or 0)
+    avg_change = float(row.get("行业平均涨跌幅", 0) or 0)
+    avg_turnover = float(row.get("行业平均换手率", 0) or 0)
+    return (
+        f"行业景气：所属行业为 {industry}；同业样本 {sample_count} 只，"
+        f"样本平均涨跌幅 {avg_change:.2f}%，平均换手率 {avg_turnover:.2f}%。"
+        "这是当前股票池内的行业强弱代理，不是完整行业景气指数。"
+    )
+
+
+def _add_industry_proxy(df: pd.DataFrame) -> pd.DataFrame:
+    result = df.copy()
+    if "行业" not in result.columns:
+        result["行业"] = ""
+    valid = result[result["行业"].astype(str) != ""]
+    if valid.empty:
+        result["行业样本数"] = 0
+        result["行业平均涨跌幅"] = 0.0
+        result["行业平均换手率"] = 0.0
+        return result
+    grouped = valid.groupby("行业").agg(
+        行业样本数=("代码", "size"),
+        行业平均涨跌幅=("涨跌幅", "mean"),
+        行业平均换手率=("换手率", "mean"),
+    )
+    return result.merge(grouped, on="行业", how="left").fillna(
+        {"行业样本数": 0, "行业平均涨跌幅": 0.0, "行业平均换手率": 0.0}
+    )
+
+
+def _support_evidence(row: pd.Series) -> str:
+    evidence = []
+    if _row_number(row, "技术面评分") >= 60:
+        evidence.append("技术面活跃")
+    if _row_number(row, "基本面评分") >= 60:
+        evidence.append("基本面评分靠前")
+    if _row_number(row, "财报质量评分") >= 60:
+        evidence.append("财报质量评分较好")
+    if _row_number(row, "经营现金流") > 0:
+        evidence.append("经营现金流为正")
+    pe = _row_number(row, "市盈率-动态")
+    if 0 < pe <= 45:
+        evidence.append("估值未处于规则定义的极端高估区")
+    if not evidence:
+        evidence.append("综合排序靠前，但强支持证据不足")
+    return "支持：" + "；".join(evidence[:4]) + "。"
+
+
+def _opposition_evidence(row: pd.Series) -> str:
+    evidence = []
+    risk_level = str(row.get("风险等级", "待核查"))
+    if risk_level in {"中", "高"}:
+        evidence.append(f"公告/新闻风险等级为{row['风险等级']}")
+    profit_growth = _row_number(row, "净利润同比")
+    if profit_growth < 0:
+        evidence.append(f"净利润同比 {profit_growth:.1f}%")
+    if _row_number(row, "经营现金流") < 0:
+        evidence.append("经营现金流为负")
+    debt_ratio = _row_number(row, "资产负债率")
+    if debt_ratio > 70:
+        evidence.append(f"资产负债率 {debt_ratio:.1f}% 偏高")
+    pe = _row_number(row, "市盈率-动态")
+    if pe > 60:
+        evidence.append(f"动态市盈率 {pe:.1f} 偏高")
+    if int(row.get("行业样本数", 0) or 0) < 3:
+        evidence.append("行业代理样本偏少")
+    if not evidence:
+        evidence.append("暂未发现规则内的明显反对证据")
+    return "反对：" + "；".join(evidence[:4]) + "。"
+
+
+def _row_number(row: pd.Series, column: str) -> float:
+    try:
+        return float(row.get(column, 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _enrich_financial_evidence(spot: pd.DataFrame) -> pd.DataFrame:
@@ -620,23 +704,31 @@ def _enrich_selected_risks(candidates: dict[str, pd.DataFrame]) -> dict[str, pd.
             enriched[period] = frame
             continue
         result = frame.copy()
-        result["公告新闻风险"] = result["代码"].astype(str).apply(_announcement_risk_analysis)
+        risk = result["代码"].astype(str).apply(_announcement_risk_analysis)
+        result["公告新闻风险"] = risk.apply(lambda item: item[0])
+        result["风险等级"] = risk.apply(lambda item: item[1])
+        result["支持证据"] = result.apply(_support_evidence, axis=1)
+        result["反对证据"] = result.apply(_opposition_evidence, axis=1)
         enriched[period] = result
     return enriched
 
 
-def _announcement_risk_analysis(code: str) -> str:
+def _announcement_risk_analysis(code: str) -> tuple[str, str]:
     try:
         titles = _fetch_recent_announcement_titles(str(code).zfill(6))
     except Exception:
-        return "公告/新闻风险：未取得可靠近期公告数据。"
+        return "公告/新闻风险：未取得可靠近期公告数据。", "待核查"
     if not titles:
-        return "公告/新闻风险：近期公告标题未见明显风险词。"
-    risk_words = ("处罚", "问询", "立案", "诉讼", "仲裁", "减持", "亏损", "退市", "风险", "终止")
-    risky = [title for title in titles if any(word in title for word in risk_words)]
-    if risky:
-        return "公告/新闻风险：近期公告含风险词，需核查：" + "；".join(risky[:2]) + "。"
-    return "公告/新闻风险：近期公告标题未见明显风险词。"
+        return "公告/新闻风险：近期公告标题未见明显风险词。", "低"
+    high_words = ("立案", "处罚", "退市", "重大亏损", "终止上市")
+    medium_words = ("问询", "诉讼", "仲裁", "减持", "亏损", "风险", "终止")
+    high_risky = [title for title in titles if any(word in title for word in high_words)]
+    if high_risky:
+        return "公告/新闻风险：近期公告含高风险词，需核查：" + "；".join(high_risky[:2]) + "。", "高"
+    medium_risky = [title for title in titles if any(word in title for word in medium_words)]
+    if medium_risky:
+        return "公告/新闻风险：近期公告含风险词，需核查：" + "；".join(medium_risky[:2]) + "。", "中"
+    return "公告/新闻风险：近期公告标题未见明显风险词。", "低"
 
 
 def _fetch_recent_announcement_titles(code: str) -> list[str]:

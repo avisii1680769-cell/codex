@@ -170,6 +170,7 @@ def _candidate_cards(frame: pd.DataFrame) -> str:
                 <span class="score">看涨评分 {html.escape(_fmt(row.get("看涨评分")))}</span>
                 <span class="score">技术面评分 {html.escape(_fmt(row.get("技术面评分")))}</span>
                 <span class="score">基本面评分 {html.escape(_fmt(row.get("基本面评分")))}</span>
+                <span class="score">风险等级 {html.escape(str(row.get("风险等级", "待核查")))}</span>
               </div>
               <p class="analysis">{html.escape(str(row.get("技术面分析", "")))}</p>
               <p class="analysis">{html.escape(str(row.get("基本面分析", "")))}</p>
@@ -178,6 +179,8 @@ def _candidate_cards(frame: pd.DataFrame) -> str:
               <p class="analysis">{html.escape(str(row.get("现金流分析", "")))}</p>
               <p class="analysis">{html.escape(str(row.get("行业景气分析", "")))}</p>
               <p class="analysis">{html.escape(str(row.get("公告新闻风险", "")))}</p>
+              <p class="analysis">{html.escape(str(row.get("支持证据", "")))}</p>
+              <p class="analysis">{html.escape(str(row.get("反对证据", "")))}</p>
               <p class="hint">{html.escape(str(row.get("入选理由", "")))}</p>
             </article>
             """

@@ -57,6 +57,9 @@ def test_rank_live_candidates_returns_stable_columns_for_empty_input():
         "现金流分析",
         "行业景气分析",
         "公告新闻风险",
+        "风险等级",
+        "支持证据",
+        "反对证据",
         "入选理由",
     ]
 
@@ -81,6 +84,8 @@ def test_rank_live_candidates_uses_technical_and_fundamental_scores():
             "资产负债率": [45.0, 92.0],
             "经营现金流": [4_000_000_000, -2_000_000_000],
             "行业": ["银行", "高风险行业"],
+            "公告新闻风险": ["公告/新闻风险：近期公告标题未见明显风险词。", "公告/新闻风险：近期公告含风险词。"],
+            "风险等级": ["低", "高"],
         }
     )
 
@@ -96,6 +101,11 @@ def test_rank_live_candidates_uses_technical_and_fundamental_scores():
     assert "负债：" in first_mid["负债分析"]
     assert "现金流：" in first_mid["现金流分析"]
     assert "行业景气：" in first_mid["行业景气分析"]
+    assert "同业样本" in first_mid["行业景气分析"]
+    assert "支持证据" in first_mid
+    assert "反对证据" in first_mid
+    assert first_mid["支持证据"]
+    assert first_mid["反对证据"]
 
 
 def test_enrich_selected_risks_adds_announcement_risk(monkeypatch):
@@ -115,7 +125,9 @@ def test_enrich_selected_risks_adds_announcement_risk(monkeypatch):
     enriched = live._enrich_selected_risks(candidates)
 
     assert "公告新闻风险" in enriched["短期"].columns
+    assert "风险等级" in enriched["短期"].columns
     assert "风险词" in enriched["短期"].iloc[0]["公告新闻风险"]
+    assert enriched["短期"].iloc[0]["风险等级"] == "中"
 
 
 def test_fetch_live_spot_tries_next_eastmoney_host_before_cache(monkeypatch):
