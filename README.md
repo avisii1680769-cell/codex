@@ -1,5 +1,7 @@
 # stock-bullish
 
+[![CI](https://github.com/avisii1680769-cell/codex/actions/workflows/ci.yml/badge.svg)](https://github.com/avisii1680769-cell/codex/actions/workflows/ci.yml)
+
 Python research tool for screening A-share bullish signals and evaluating them with historical backtests.
 
 ## Installation
@@ -22,6 +24,8 @@ The command writes:
 - `outputs/research/summary.md`
 
 Empty reports are valid when the input data does not produce matching strategy signals. The CSV still keeps the standard summary header.
+
+Use `examples/market_data_template.csv` as a template for real daily market data. See `docs/data-input-template.md` for field definitions and examples.
 
 ## Input Data
 

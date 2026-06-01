@@ -1,0 +1,2 @@
+trade_date,symbol,open,high,low,close,volume,amount,is_st,is_suspended,is_delisted,listing_days,industry,market_cap,turnover
+2026-01-02,000001.SZ,10.00,10.30,9.90,10.10,100000,1010000,false,false,false,5200,bank,12000000000,1.20
