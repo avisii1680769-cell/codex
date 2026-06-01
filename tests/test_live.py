@@ -200,6 +200,11 @@ def test_fetch_live_spot_uses_cache_after_all_hosts_fail(monkeypatch):
     monkeypatch.setattr(live, "_fetch_eastmoney_spot", fake_fetch)
     monkeypatch.setattr(
         live,
+        "_fetch_akshare_spot",
+        lambda: (_ for _ in ()).throw(RuntimeError("akshare failed")),
+    )
+    monkeypatch.setattr(
+        live,
         "_fetch_tencent_spot",
         lambda: (_ for _ in ()).throw(RuntimeError("fallback failed")),
     )
@@ -224,6 +229,11 @@ def test_fetch_live_spot_uses_tencent_source_before_cache(monkeypatch):
         raise AssertionError("cache should not be used when tencent source works")
 
     monkeypatch.setattr(live, "_fetch_eastmoney_spot", fake_fetch)
+    monkeypatch.setattr(
+        live,
+        "_fetch_akshare_spot",
+        lambda: (_ for _ in ()).throw(RuntimeError("akshare failed")),
+    )
     monkeypatch.setattr(live, "_fetch_tencent_spot", lambda: sample)
     monkeypatch.setattr(live, "_enrich_financial_evidence", lambda spot: spot)
     monkeypatch.setattr(live, "_read_cached_spot", fail_if_cache_is_used)
@@ -233,6 +243,141 @@ def test_fetch_live_spot_uses_tencent_source_before_cache(monkeypatch):
 
     assert result.equals(sample)
     assert attempts == list(live.EASTMONEY_HOSTS)
+
+
+def test_fetch_live_spot_uses_akshare_full_market_before_tencent(monkeypatch):
+    attempts = []
+    akshare_spot = pd.DataFrame(
+        {
+            "代码": ["000001", "600000"],
+            "名称": ["平安银行", "浦发银行"],
+            "最新价": [10.0, 9.0],
+            "涨跌幅": [1.2, -0.5],
+            "成交额": [100_000_000, 90_000_000],
+            "换手率": [1.5, 0.5],
+            "量比": [1.1, 0.8],
+            "振幅": [2.0, 1.5],
+            "总市值": [100_000_000_000, 200_000_000_000],
+            "市净率": [0.8, 0.5],
+            "市盈率-动态": [6.0, 7.0],
+        }
+    )
+    akshare_spot.attrs["raw_count"] = 5524
+    akshare_spot.attrs["filtered_count"] = 2
+    akshare_spot.attrs["scan_scope"] = "全A股实时行情"
+    akshare_spot.attrs["data_source"] = "AkShare 新浪全市场行情"
+
+    def fake_fetch(host: str) -> pd.DataFrame:
+        attempts.append(host)
+        raise RuntimeError("host failed")
+
+    def fail_if_tencent_is_used() -> pd.DataFrame:
+        raise AssertionError("tencent should not be used when akshare full market works")
+
+    monkeypatch.setattr(live, "_fetch_eastmoney_spot", fake_fetch)
+    monkeypatch.setattr(live, "_fetch_akshare_spot", lambda: akshare_spot)
+    monkeypatch.setattr(live, "_fetch_tencent_spot", fail_if_tencent_is_used)
+    monkeypatch.setattr(live, "_enrich_financial_evidence", lambda spot: spot)
+    monkeypatch.setattr(live, "_read_cached_spot", lambda: None)
+    monkeypatch.setattr(live, "_write_cached_spot", lambda spot: None)
+
+    result = live.fetch_live_spot()
+
+    assert result.equals(akshare_spot)
+    assert result.attrs["raw_count"] == 5524
+    assert result.attrs["scan_scope"] == "全A股实时行情"
+    assert attempts == list(live.EASTMONEY_HOSTS)
+
+
+def test_fetch_eastmoney_spot_uses_system_proxy_and_records_full_market_metadata(monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "data": {
+                    "total": 5857,
+                    "diff": [
+                        {
+                            "f2": 10.0,
+                            "f3": 1.2,
+                            "f6": 100_000_000,
+                            "f7": 2.0,
+                            "f8": 1.5,
+                            "f10": 1.1,
+                            "f12": "000001",
+                            "f14": "平安银行",
+                            "f20": 100_000_000_000,
+                            "f23": 0.8,
+                            "f115": 6.2,
+                        }
+                    ],
+                }
+            }
+
+    sessions = []
+
+    class FakeSession:
+        trust_env = False
+
+        def __init__(self):
+            self.headers = {}
+            self.params = []
+            sessions.append(self)
+
+        def get(self, url, params, timeout):
+            self.params.append(params)
+            if params["pn"] == 1:
+                return FakeResponse()
+            return type(
+                "EmptyResponse",
+                (),
+                {"raise_for_status": lambda self: None, "json": lambda self: {"data": {"diff": []}}},
+            )()
+
+    monkeypatch.setattr(live.requests, "Session", FakeSession)
+
+    frame = live._fetch_eastmoney_spot()
+
+    assert sessions[0].trust_env is True
+    assert len(frame) == 1
+    assert frame.attrs["raw_count"] == 5857
+    assert frame.attrs["scan_scope"] == "全A股实时行情"
+
+
+def test_scan_live_candidates_returns_scope_metadata(monkeypatch):
+    spot = pd.DataFrame(
+        {
+            "代码": ["000001", "000002"],
+            "名称": ["平安银行", "万科A"],
+            "最新价": [10.0, 20.0],
+            "涨跌幅": [1.0, 2.0],
+            "成交额": [100_000_000, 200_000_000],
+            "换手率": [1.0, 2.0],
+            "量比": [1.0, 1.2],
+            "振幅": [2.0, 3.0],
+            "市盈率-动态": [6.0, 8.0],
+            "市净率": [0.8, 1.0],
+            "总市值": [100_000_000_000, 200_000_000_000],
+        }
+    )
+    spot.attrs["raw_count"] = 5857
+    spot.attrs["filtered_count"] = 4000
+    spot.attrs["scan_scope"] = "全A股实时行情"
+    spot.attrs["data_source"] = "东方财富全市场行情"
+
+    monkeypatch.setattr(live, "fetch_live_spot", lambda: spot)
+    monkeypatch.setattr(live, "_enrich_selected_risks", lambda candidates: candidates)
+
+    candidates, updated_at, metadata = live.scan_live_candidates(limit=1)
+
+    assert updated_at
+    assert sum(len(frame) for frame in candidates.values()) == 3
+    assert metadata["raw_count"] == 5857
+    assert metadata["filtered_count"] == 4000
+    assert metadata["deep_analysis_count"] == 2
+    assert metadata["scan_scope"] == "全A股实时行情"
 
 
 def test_parse_margin_financing_rows_keeps_latest_row_per_stock():
@@ -316,3 +461,24 @@ def test_parse_main_fund_flow_rows_maps_push2_fields():
     assert parsed.iloc[0]["主力净流入"] == 112414454.0
     assert parsed.iloc[0]["主力净占比"] == 10.79
     assert parsed.iloc[0]["大单净流入"] == 53330786.0
+
+
+def test_parse_news_rss_titles_extracts_titles():
+    payload = """<?xml version="1.0"?><rss><channel>
+    <item><title>平安银行发布业绩增长公告</title></item>
+    <item><title>平安银行回应监管问询</title></item>
+    </channel></rss>"""
+
+    titles = live._parse_news_rss_titles(payload)
+
+    assert titles == ["平安银行发布业绩增长公告", "平安银行回应监管问询"]
+
+
+def test_news_sentiment_analysis_reports_risk_words():
+    row = pd.Series({"新闻标题列表": ["公司收到监管问询", "业绩增长"]})
+
+    text = live._web_news_sentiment_analysis(row)
+
+    assert "新闻舆情" in text
+    assert "风险词" in text
+    assert "监管问询" in text

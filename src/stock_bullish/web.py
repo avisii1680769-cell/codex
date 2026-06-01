@@ -38,11 +38,13 @@ def render_home_page(
     candidates: dict[str, pd.DataFrame] | None = None,
     updated_at: str | None = None,
     error: str | None = None,
+    metadata: dict[str, object] | None = None,
 ) -> str:
     error_html = f'<section class="panel error">{html.escape(error)}</section>' if error else ""
     candidate_html = _candidate_sections(candidates or {})
     updated = html.escape(updated_at or "等待行情源返回")
     total = sum(len(frame) for frame in (candidates or {}).values())
+    scope_html = _scope_panel(metadata)
     return _page(
         "A 股多周期候选评分",
         f"""
@@ -55,6 +57,7 @@ def render_home_page(
           </div>
           <p class="hint">首页固定展示每个周期 5 只候选，不需要输入数量扫描。排序同时使用技术面评分和基本面评分。</p>
         </section>
+        {scope_html}
         <section class="panel risk">
           <h2>实事求是的边界</h2>
           <p>这里不是荐股结论，也不是买入建议。页面会尽量抓取行情、估值、财报、公告、融资融券、互联互通持仓和主力资金接口；接口不可用或口径不稳定时，会明确显示未取得可靠数据，不把占位信息当成判断依据。</p>
@@ -87,11 +90,11 @@ def serve(host: str = "127.0.0.1", port: int = 8765, output_dir: str | Path = "o
 
         def _run_home_scan(self) -> None:
             try:
-                candidates, updated_at = scan_live_candidates(limit=HOME_LIMIT)
+                candidates, updated_at, metadata = scan_live_candidates(limit=HOME_LIMIT)
             except Exception as exc:  # noqa: BLE001
                 self._send_html(render_home_page(error=str(exc)))
                 return
-            self._send_html(render_home_page(candidates=candidates, updated_at=updated_at))
+            self._send_html(render_home_page(candidates=candidates, updated_at=updated_at, metadata=metadata))
 
         def log_message(self, format: str, *args: object) -> None:
             return
@@ -136,10 +139,37 @@ def _model_truth_panel() -> str:
       <ul>
         <li>已接入利润、负债、现金流、应收账款、存货、商誉、扣非净利润、公告标题风险、融资融券、互联互通持仓和主力资金流向的可用接口口径。</li>
         <li>互联互通持仓只能代表该披露口径，不等同于完整机构持仓；主力资金和融资融券是交易数据，不等同于确定性买入理由。</li>
-        <li>全网新闻舆情、政策周期和历史回测胜率校准仍未找到足够稳定的结构化接口，当前只做诚实占位。</li>
+        <li>新闻舆情使用 Bing 新闻和 Google 新闻 RSS 的标题搜索作为代理来源，只对最终候选做辅助分析，不等同于覆盖全网所有信息。</li>
+        <li>政策周期和历史回测胜率校准仍未找到足够稳定的结构化接口，当前只做诚实占位。</li>
         <li>行业景气和估值分位仍是当前股票池内的代理指标，未按完整行业数据库做深度校准。</li>
         <li>当前权重来自透明经验规则，还没有用历史回测校准为真实成功率。</li>
       </ul>
+    </section>
+    """
+
+
+def _scope_panel(metadata: dict[str, object] | None) -> str:
+    if not metadata:
+        return ""
+    scope = str(metadata.get("scan_scope", "未知扫描范围"))
+    data_source = str(metadata.get("data_source", "未知数据源"))
+    raw_count = html.escape(str(metadata.get("raw_count", 0)))
+    filtered_count = html.escape(str(metadata.get("filtered_count", 0)))
+    deep_count = html.escape(str(metadata.get("deep_analysis_count", 0)))
+    warning = ""
+    if scope != "全A股实时行情":
+        warning = '<p class="hint">当前不是全 A 股扫描，结果只代表该数据源覆盖范围。</p>'
+    return f"""
+    <section class="panel">
+      <h2>扫描范围</h2>
+      <div class="metrics">
+        <div class="metric"><span>当前范围</span><strong>{html.escape(scope)}</strong></div>
+        <div class="metric"><span>原始样本</span><strong>{raw_count}</strong></div>
+        <div class="metric"><span>过滤后样本</span><strong>{filtered_count}</strong></div>
+        <div class="metric"><span>深度分析</span><strong>{deep_count}</strong></div>
+      </div>
+      <p class="hint">数据源：{html.escape(data_source)}</p>
+      {warning}
     </section>
     """
 

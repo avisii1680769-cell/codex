@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 import time
+import xml.etree.ElementTree as ET
 
 import pandas as pd
 import requests
@@ -121,9 +122,16 @@ def fetch_live_spot() -> pd.DataFrame:
     except Exception as exc:
         cached = _read_cached_spot()
         if cached is not None:
+            cached.attrs["raw_count"] = len(cached)
+            cached.attrs["filtered_count"] = len(cached)
+            cached.attrs["scan_scope"] = "缓存行情"
+            cached.attrs["data_source"] = "本地缓存"
             return cached
         raise RuntimeError("实时行情源暂时无响应，请稍后重新扫描。") from exc
-    spot = _enrich_financial_evidence(spot)
+    attrs = dict(spot.attrs)
+    if len(spot) <= 500:
+        spot = _enrich_financial_evidence(spot)
+    spot.attrs.update(attrs)
     _write_cached_spot(spot)
     return spot
 
@@ -136,7 +144,16 @@ def _fetch_live_spot_from_sources() -> pd.DataFrame:
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{host}: {exc}")
     try:
-        return _fetch_tencent_spot()
+        return _fetch_akshare_spot()
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"akshare: {exc}")
+    try:
+        frame = _fetch_tencent_spot()
+        frame.attrs["raw_count"] = len(frame)
+        frame.attrs["filtered_count"] = len(frame)
+        frame.attrs["scan_scope"] = "高流动性观察池"
+        frame.attrs["data_source"] = "腾讯观察池备用行情"
+        return frame
     except Exception as exc:  # noqa: BLE001
         errors.append(f"qt.gtimg.cn: {exc}")
     raise RuntimeError("; ".join(errors) or "no live data source configured")
@@ -145,7 +162,7 @@ def _fetch_live_spot_from_sources() -> pd.DataFrame:
 def _fetch_eastmoney_spot(host: str = EASTMONEY_HOSTS[0]) -> pd.DataFrame:
     url = f"https://{host}/api/qt/clist/get"
     session = requests.Session()
-    session.trust_env = False
+    session.trust_env = True
     session.headers.update(
         {
             "Accept": "application/json,text/plain,*/*",
@@ -158,6 +175,7 @@ def _fetch_eastmoney_spot(host: str = EASTMONEY_HOSTS[0]) -> pd.DataFrame:
         }
     )
     rows = []
+    raw_count = 0
     for page in range(1, 80):
         params = {
             "pn": page,
@@ -175,6 +193,7 @@ def _fetch_eastmoney_spot(host: str = EASTMONEY_HOSTS[0]) -> pd.DataFrame:
         if response is None:
             break
         data = response.json().get("data") or {}
+        raw_count = int(data.get("total") or raw_count or 0)
         diff = data.get("diff") or []
         if not diff:
             break
@@ -183,8 +202,7 @@ def _fetch_eastmoney_spot(host: str = EASTMONEY_HOSTS[0]) -> pd.DataFrame:
     if not rows:
         raise RuntimeError("无法获取实时行情，请稍后重试。")
 
-    frame = pd.DataFrame(rows)
-    return frame.rename(
+    frame = pd.DataFrame(rows).rename(
         columns={
             "f2": "最新价",
             "f3": "涨跌幅",
@@ -199,9 +217,75 @@ def _fetch_eastmoney_spot(host: str = EASTMONEY_HOSTS[0]) -> pd.DataFrame:
             "f115": "市盈率-动态",
         }
     )
+    filtered = _filter_a_share_universe(frame)
+    filtered.attrs["raw_count"] = raw_count or len(frame)
+    filtered.attrs["filtered_count"] = len(filtered)
+    filtered.attrs["scan_scope"] = "全A股实时行情"
+    filtered.attrs["data_source"] = "东方财富全市场行情"
+    return filtered
+
+
+def _fetch_akshare_spot() -> pd.DataFrame:
+    try:
+        import akshare as ak  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise RuntimeError("AkShare 未安装，无法使用备用全市场行情源。") from exc
+
+    source = ak.stock_info_a_code_name()
+    if source.empty:
+        raise RuntimeError("AkShare A 股代码列表返回为空。")
+    code_column = "code" if "code" in source.columns else "代码"
+    name_column = "name" if "name" in source.columns else "名称"
+    code_frame = source.rename(columns={code_column: "代码", name_column: "名称"}).copy()
+    code_frame["代码"] = code_frame["代码"].astype(str).str.zfill(6)
+    code_frame["名称"] = code_frame["名称"].astype(str)
+    code_frame = _filter_code_name_universe(code_frame)
+    if code_frame.empty:
+        raise RuntimeError("AkShare A 股代码列表过滤后为空。")
+    quote = _fetch_tencent_spot_for_codes(code_frame["代码"].tolist())
+    if quote.empty:
+        raise RuntimeError("腾讯批量行情未返回 AkShare 代码列表行情。")
+    filtered = _filter_a_share_universe(quote.merge(code_frame, on="代码", how="left", suffixes=("", "_列表")))
+    if "名称_列表" in filtered.columns:
+        filtered["名称"] = filtered["名称"].where(filtered["名称"].astype(str) != "", filtered["名称_列表"])
+        filtered = filtered.drop(columns=["名称_列表"])
+    filtered.attrs["raw_count"] = len(source)
+    filtered.attrs["filtered_count"] = len(filtered)
+    filtered.attrs["scan_scope"] = "全A股实时行情"
+    filtered.attrs["data_source"] = "AkShare 代码列表 + 腾讯批量行情"
+    return filtered
+
+
+def _filter_code_name_universe(frame: pd.DataFrame) -> pd.DataFrame:
+    result = frame.copy()
+    allowed_prefixes = ("000", "001", "002", "003", "300", "301", "600", "601", "603", "605", "688", "689")
+    is_allowed_board = result["代码"].str.startswith(allowed_prefixes)
+    is_normal_name = ~result["名称"].str.contains("ST|退", case=False, regex=True, na=False)
+    return result[is_allowed_board & is_normal_name].reset_index(drop=True)
+
+
+def _filter_a_share_universe(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty or "代码" not in frame.columns:
+        return frame
+    result = frame.copy()
+    result["代码"] = result["代码"].astype(str).str.zfill(6)
+    result["名称"] = result["名称"].astype(str)
+    allowed_prefixes = ("000", "001", "002", "003", "300", "301", "600", "601", "603", "605", "688", "689")
+    is_allowed_board = result["代码"].str.startswith(allowed_prefixes)
+    is_normal_name = ~result["名称"].str.contains("ST|退", case=False, regex=True, na=False)
+    for column in ["最新价", "成交额"]:
+        if column not in result.columns:
+            result[column] = 0
+        result[column] = pd.to_numeric(result[column], errors="coerce").fillna(0)
+    is_trading = (result["最新价"] > 0) & (result["成交额"] > 0)
+    return result[is_allowed_board & is_normal_name & is_trading].reset_index(drop=True)
 
 
 def _fetch_tencent_spot() -> pd.DataFrame:
+    return _fetch_tencent_spot_for_codes(TENCENT_WATCHLIST)
+
+
+def _fetch_tencent_spot_for_codes(codes: list[str] | tuple[str, ...]) -> pd.DataFrame:
     session = requests.Session()
     session.headers.update(
         {
@@ -215,7 +299,7 @@ def _fetch_tencent_spot() -> pd.DataFrame:
         }
     )
     rows = []
-    symbols = [_tencent_symbol(code) for code in TENCENT_WATCHLIST]
+    symbols = [_tencent_symbol(str(code)) for code in codes]
     for start in range(0, len(symbols), 60):
         url = "https://qt.gtimg.cn/q=" + ",".join(symbols[start : start + 60])
         response = session.get(url, timeout=20)
@@ -300,11 +384,37 @@ def _write_cached_spot(spot: pd.DataFrame) -> None:
         return
 
 
-def scan_live_candidates(limit: int = 5) -> tuple[dict[str, pd.DataFrame], str]:
+def scan_live_candidates(limit: int = 5) -> tuple[dict[str, pd.DataFrame], str, dict[str, object]]:
     spot = fetch_live_spot()
-    candidates = rank_live_candidates(spot, limit=limit)
+    analysis_spot = _prepare_deep_analysis_spot(spot, limit)
+    candidates = rank_live_candidates(analysis_spot, limit=limit)
     candidates = _enrich_selected_risks(candidates)
-    return candidates, datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    metadata = {
+        "raw_count": int(spot.attrs.get("raw_count", len(spot))),
+        "filtered_count": int(spot.attrs.get("filtered_count", len(spot))),
+        "deep_analysis_count": len(analysis_spot),
+        "scan_scope": spot.attrs.get("scan_scope", "未知扫描范围"),
+        "data_source": spot.attrs.get("data_source", "未知数据源"),
+    }
+    return candidates, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), metadata
+
+
+def _prepare_deep_analysis_spot(spot: pd.DataFrame, limit: int) -> pd.DataFrame:
+    if spot.empty or len(spot) <= 500:
+        return spot
+    preliminary = rank_live_candidates(spot, limit=max(limit * 10, 50))
+    codes = {
+        str(code).zfill(6)
+        for frame in preliminary.values()
+        for code in frame.get("代码", pd.Series(dtype=str)).dropna().astype(str)
+    }
+    if not codes:
+        return spot.head(max(limit * 10, 50)).copy()
+    subset = spot[spot["代码"].astype(str).str.zfill(6).isin(codes)].copy()
+    attrs = dict(spot.attrs)
+    enriched = _enrich_financial_evidence(subset)
+    enriched.attrs.update(attrs)
+    return enriched
 
 
 def rank_live_candidates(spot: pd.DataFrame, limit: int = 20) -> dict[str, pd.DataFrame]:
@@ -657,7 +767,18 @@ def _policy_cycle_analysis(row: pd.Series) -> str:
 
 
 def _web_news_sentiment_analysis(row: pd.Series) -> str:
-    return "全网新闻舆情：未接入稳定全网新闻源，当前仅使用公告标题风险作为替代证据。"
+    titles = row.get("新闻标题列表", [])
+    if not isinstance(titles, list) or not titles:
+        return "全网新闻舆情：未取得可靠新闻搜索结果，暂不参与加分。"
+    risk_words = ("问询", "监管", "处罚", "立案", "诉讼", "仲裁", "减持", "亏损", "退市", "风险", "暴跌")
+    positive_words = ("增长", "回购", "增持", "中标", "突破", "创新高", "盈利", "改善")
+    risky = [title for title in titles if any(word in title for word in risk_words)]
+    positive = [title for title in titles if any(word in title for word in positive_words)]
+    if risky:
+        return "全网新闻舆情：新闻搜索结果含风险词，需核查：" + "；".join(risky[:2]) + "。"
+    if positive:
+        return "全网新闻舆情：新闻搜索结果偏正面，但只作为辅助证据：" + "；".join(positive[:2]) + "。"
+    return "全网新闻舆情：新闻搜索结果未见明显风险词，样本标题：" + "；".join(titles[:2]) + "。"
 
 
 def _backtest_calibration_analysis(row: pd.Series) -> str:
@@ -1076,6 +1197,11 @@ def _enrich_selected_risks(candidates: dict[str, pd.DataFrame]) -> dict[str, pd.
             result["北向资金分析"] = result.apply(_northbound_analysis, axis=1)
             result["融资融券分析"] = result.apply(_margin_financing_analysis, axis=1)
             result["主力资金流向"] = result.apply(_main_fund_flow_analysis, axis=1)
+        result["新闻标题列表"] = result.apply(
+            lambda row: _fetch_news_titles(str(row.get("名称", "")), str(row.get("代码", ""))),
+            axis=1,
+        )
+        result["全网新闻舆情"] = result.apply(_web_news_sentiment_analysis, axis=1)
         risk = result["代码"].astype(str).apply(_announcement_risk_analysis)
         result["公告新闻风险"] = risk.apply(lambda item: item[0])
         result["风险等级"] = risk.apply(lambda item: item[1])
@@ -1120,3 +1246,57 @@ def _fetch_recent_announcement_titles(code: str) -> list[str]:
     response.raise_for_status()
     rows = ((response.json().get("data") or {}).get("list") or [])
     return [str(row.get("title", "")) for row in rows if row.get("title")]
+
+
+def _fetch_news_titles(name: str, code: str, limit: int = 5) -> list[str]:
+    keyword = (name or code or "").strip()
+    if not keyword:
+        return []
+    queries = [f"{keyword} 股票", f"{keyword} 财报"]
+    titles: list[str] = []
+    for query in queries:
+        for url in _news_rss_urls(query):
+            try:
+                response = requests.get(
+                    url,
+                    timeout=10,
+                    headers={"User-Agent": "Mozilla/5.0"},
+                )
+                response.raise_for_status()
+                titles.extend(_parse_news_rss_titles(response.text))
+            except Exception:
+                continue
+            if len(titles) >= limit:
+                break
+        if len(titles) >= limit:
+            break
+    deduped = []
+    seen = set()
+    for title in titles:
+        normalized = title.strip()
+        if normalized and normalized not in seen:
+            deduped.append(normalized)
+            seen.add(normalized)
+        if len(deduped) >= limit:
+            break
+    return deduped
+
+
+def _news_rss_urls(query: str) -> list[str]:
+    from urllib.parse import quote
+
+    encoded = quote(query)
+    return [
+        f"https://www.bing.com/news/search?q={encoded}&format=RSS",
+        f"https://news.google.com/rss/search?q={encoded}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+    ]
+
+
+def _parse_news_rss_titles(payload: str) -> list[str]:
+    root = ET.fromstring(payload)
+    titles = []
+    for item in root.findall(".//item"):
+        title = item.findtext("title")
+        if title:
+            titles.append(title.strip())
+    return titles
