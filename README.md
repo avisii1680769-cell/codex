@@ -24,6 +24,14 @@ By default, `research` evaluates all built-in strategy presets. To run one prese
 stock-bullish research examples/sample_prices.csv --output-dir outputs/research --strategy-name trend_volume
 ```
 
+Start the local browser UI:
+
+```powershell
+stock-bullish web --host 127.0.0.1 --port 8765 --output-dir outputs/web
+```
+
+Then open `http://127.0.0.1:8765`, upload a CSV or Parquet market-data file, choose a strategy preset, and run the backtest from the page.
+
 The command writes:
 
 - `outputs/research/summary.csv`
