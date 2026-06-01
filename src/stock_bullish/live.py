@@ -24,11 +24,73 @@ LIVE_COLUMNS = [
     "入选理由",
 ]
 CACHE_PATH = Path("outputs/live-web/latest_spot.csv")
+EASTMONEY_HOSTS = (
+    "push2.eastmoney.com",
+    "82.push2.eastmoney.com",
+    "15.push2.eastmoney.com",
+)
+TENCENT_WATCHLIST = (
+    "600000",
+    "600030",
+    "600036",
+    "600050",
+    "600276",
+    "600519",
+    "600690",
+    "600887",
+    "601012",
+    "601166",
+    "601318",
+    "601328",
+    "601398",
+    "601601",
+    "601668",
+    "601688",
+    "601857",
+    "601888",
+    "601899",
+    "601988",
+    "000001",
+    "000002",
+    "000063",
+    "000333",
+    "000651",
+    "000858",
+    "002027",
+    "002142",
+    "002230",
+    "002415",
+    "002475",
+    "002594",
+    "002714",
+    "300014",
+    "300015",
+    "300059",
+    "300122",
+    "300124",
+    "300274",
+    "300308",
+    "300347",
+    "300408",
+    "300498",
+    "300750",
+)
+COL_CODE = LIVE_COLUMNS[2]
+COL_NAME = LIVE_COLUMNS[3]
+COL_LAST_PRICE = LIVE_COLUMNS[4]
+COL_CHANGE_PCT = LIVE_COLUMNS[5]
+COL_AMOUNT = LIVE_COLUMNS[6]
+COL_TURNOVER = LIVE_COLUMNS[7]
+COL_VOLUME_RATIO = LIVE_COLUMNS[8]
+COL_AMPLITUDE = LIVE_COLUMNS[9]
+COL_TOTAL_MARKET_VALUE = "\u603b\u5e02\u503c"
+COL_PB = "\u5e02\u51c0\u7387"
+COL_PE_DYNAMIC = "\u5e02\u76c8\u7387-\u52a8\u6001"
 
 
 def fetch_live_spot() -> pd.DataFrame:
     try:
-        spot = _fetch_eastmoney_spot()
+        spot = _fetch_live_spot_from_sources()
     except Exception as exc:
         cached = _read_cached_spot()
         if cached is not None:
@@ -38,10 +100,35 @@ def fetch_live_spot() -> pd.DataFrame:
     return spot
 
 
-def _fetch_eastmoney_spot() -> pd.DataFrame:
-    url = "https://push2.eastmoney.com/api/qt/clist/get"
+def _fetch_live_spot_from_sources() -> pd.DataFrame:
+    errors = []
+    for host in EASTMONEY_HOSTS:
+        try:
+            return _fetch_eastmoney_spot(host)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{host}: {exc}")
+    try:
+        return _fetch_tencent_spot()
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"qt.gtimg.cn: {exc}")
+    raise RuntimeError("; ".join(errors) or "no live data source configured")
+
+
+def _fetch_eastmoney_spot(host: str = EASTMONEY_HOSTS[0]) -> pd.DataFrame:
+    url = f"https://{host}/api/qt/clist/get"
     session = requests.Session()
     session.trust_env = False
+    session.headers.update(
+        {
+            "Accept": "application/json,text/plain,*/*",
+            "Referer": "https://quote.eastmoney.com/",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/125.0 Safari/537.36"
+            ),
+        }
+    )
     rows = []
     for page in range(1, 80):
         params = {
@@ -84,6 +171,71 @@ def _fetch_eastmoney_spot() -> pd.DataFrame:
             "f115": "市盈率-动态",
         }
     )
+
+
+def _fetch_tencent_spot() -> pd.DataFrame:
+    session = requests.Session()
+    session.headers.update(
+        {
+            "Accept": "*/*",
+            "Referer": "https://gu.qq.com/",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/125.0 Safari/537.36"
+            ),
+        }
+    )
+    rows = []
+    symbols = [_tencent_symbol(code) for code in TENCENT_WATCHLIST]
+    for start in range(0, len(symbols), 60):
+        url = "https://qt.gtimg.cn/q=" + ",".join(symbols[start : start + 60])
+        response = session.get(url, timeout=20)
+        response.raise_for_status()
+        response.encoding = "gbk"
+        rows.extend(_parse_tencent_rows(response.text))
+
+    if not rows:
+        raise RuntimeError("tencent source returned no rows")
+    return pd.DataFrame(rows)
+
+
+def _tencent_symbol(code: str) -> str:
+    return ("sh" if code.startswith("6") else "sz") + code
+
+
+def _parse_tencent_rows(payload: str) -> list[dict[str, object]]:
+    rows = []
+    for record in payload.split(";"):
+        if '="' not in record:
+            continue
+        raw = record.split('="', 1)[1].rstrip('"')
+        parts = raw.split("~")
+        if len(parts) < 58 or not parts[2]:
+            continue
+        rows.append(
+            {
+                COL_CODE: parts[2],
+                COL_NAME: parts[1],
+                COL_LAST_PRICE: _float_or_zero(parts[3]),
+                COL_CHANGE_PCT: _float_or_zero(parts[32]),
+                COL_AMOUNT: _float_or_zero(parts[57]) * 10_000,
+                COL_TURNOVER: _float_or_zero(parts[38]),
+                COL_VOLUME_RATIO: _float_or_zero(parts[49]),
+                COL_AMPLITUDE: _float_or_zero(parts[43]),
+                COL_TOTAL_MARKET_VALUE: _float_or_zero(parts[45]) * 100_000_000,
+                COL_PB: _float_or_zero(parts[46]),
+                COL_PE_DYNAMIC: _float_or_zero(parts[39]),
+            }
+        )
+    return rows
+
+
+def _float_or_zero(value: str) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _get_with_retry(
