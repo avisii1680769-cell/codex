@@ -99,6 +99,28 @@ def test_generate_signals_rejects_missing_condition_columns():
         )
 
 
+def test_generate_signals_preserves_optional_context_columns():
+    df = pd.DataFrame(
+        {
+            "trade_date": pd.to_datetime(["2026-01-01"]),
+            "symbol": ["A"],
+            "close": [10],
+            "industry": ["bank"],
+            "market_cap": [12_000_000_000],
+            "ma_bullish": [True],
+            "volume_expansion": [True],
+        }
+    )
+
+    signals = generate_signals(
+        df,
+        StrategyRule(name="breakout", conditions=("ma_bullish", "volume_expansion")),
+    )
+
+    assert signals["industry"].tolist() == ["bank"]
+    assert signals["market_cap"].tolist() == [12_000_000_000]
+
+
 def test_get_strategy_rules_returns_all_presets_by_default():
     rules = get_strategy_rules("all")
 

@@ -2,6 +2,8 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+SIGNAL_CONTEXT_COLUMNS = ("industry", "market_cap")
+
 
 @dataclass(frozen=True)
 class StrategyRule:
@@ -59,7 +61,9 @@ def generate_signals(df: pd.DataFrame, rule: StrategyRule) -> pd.DataFrame:
         mask = condition_frame.sum(axis=1) >= rule.min_score
 
     normalized_conditions = condition_frame.loc[mask].reset_index(drop=True)
-    signals = result.loc[mask, ["trade_date", "symbol", "close"]].copy().reset_index(drop=True)
+    context_columns = [column for column in SIGNAL_CONTEXT_COLUMNS if column in result.columns]
+    signal_columns = ["trade_date", "symbol", "close", *context_columns]
+    signals = result.loc[mask, signal_columns].copy().reset_index(drop=True)
     signals = signals.rename(columns={"trade_date": "signal_date", "close": "entry_close"})
     signals[list(rule.conditions)] = normalized_conditions
     signals["strategy"] = rule.name

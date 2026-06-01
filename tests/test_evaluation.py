@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from stock_bullish.evaluation import summarize_backtest
+from stock_bullish.evaluation import summarize_backtest, summarize_group_stability
 
 
 SUMMARY_COLUMNS = [
@@ -95,3 +95,41 @@ def test_summarize_backtest_preserves_raw_mean_precision():
 
     row = summary.iloc[0]
     assert row["average_return"] == pytest.approx(0.123456789123456, rel=0, abs=1e-16)
+
+
+def test_summarize_group_stability_groups_by_year_industry_and_market_cap_bucket():
+    results = pd.DataFrame(
+        {
+            "signal_date": pd.to_datetime(["2024-01-02", "2024-02-02", "2025-01-02"]),
+            "strategy": ["demo", "demo", "demo"],
+            "window": [5, 5, 5],
+            "industry": ["bank", "tech", "bank"],
+            "market_cap": [8_000_000_000, 30_000_000_000, 150_000_000_000],
+            "fixed_target_success": [True, False, True],
+            "path_success": [True, False, None],
+            "window_return": [0.05, -0.02, 0.12],
+        }
+    )
+
+    stability = summarize_group_stability(results)
+
+    assert set(stability["group_type"]) == {"year", "industry", "market_cap_bucket"}
+    year_2024 = stability[
+        (stability["group_type"] == "year") & (stability["group_value"] == "2024")
+    ].iloc[0]
+    assert year_2024["sample_count"] == 2
+    assert year_2024["fixed_target_success_rate"] == pytest.approx(0.5)
+
+    market_cap_groups = stability[stability["group_type"] == "market_cap_bucket"]
+    assert set(market_cap_groups["group_value"]) == {"small", "mid", "large"}
+
+
+def test_summarize_group_stability_returns_empty_frame_with_columns():
+    stability = summarize_group_stability(pd.DataFrame())
+
+    assert stability.empty
+    assert stability.columns.tolist() == [
+        "group_type",
+        "group_value",
+        *SUMMARY_COLUMNS,
+    ]

@@ -9,9 +9,9 @@ from stock_bullish.backtest import run_backtest
 from stock_bullish.config import BacktestConfig
 from stock_bullish.data_cleaner import filter_tradeable_universe
 from stock_bullish.data_loader import load_market_data
-from stock_bullish.evaluation import SUMMARY_COLUMNS, summarize_backtest
+from stock_bullish.evaluation import SUMMARY_COLUMNS, STABILITY_COLUMNS, summarize_backtest, summarize_group_stability
 from stock_bullish.factors import add_core_factors
-from stock_bullish.reporting import write_reports
+from stock_bullish.reporting import write_research_reports
 from stock_bullish.strategy import generate_signals, get_strategy_rules
 
 app = typer.Typer()
@@ -38,6 +38,9 @@ def research(
     prices = filter_tradeable_universe(prices, config.filters)
     if prices.empty:
         summary = pd.DataFrame(columns=SUMMARY_COLUMNS)
+        signals = pd.DataFrame()
+        results = pd.DataFrame()
+        stability = pd.DataFrame(columns=STABILITY_COLUMNS)
     else:
         prices = add_core_factors(prices)
         signals = pd.concat(
@@ -46,10 +49,19 @@ def research(
         )
         if signals.empty:
             summary = pd.DataFrame(columns=SUMMARY_COLUMNS)
+            results = pd.DataFrame()
+            stability = pd.DataFrame(columns=STABILITY_COLUMNS)
         else:
             results = run_backtest(prices, signals, config)
             summary = summarize_backtest(results)
             if summary.empty:
                 summary = pd.DataFrame(columns=SUMMARY_COLUMNS)
-    paths = write_reports(summary, output_dir)
+            stability = summarize_group_stability(results)
+    paths = write_research_reports(
+        summary=summary,
+        output_dir=output_dir,
+        signals=signals,
+        backtest_results=results,
+        stability=stability,
+    )
     console.print(f"Wrote reports: {paths}")
