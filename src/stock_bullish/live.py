@@ -22,9 +22,15 @@ LIVE_COLUMNS = [
     "看涨评分",
     "技术面评分",
     "基本面评分",
+    "财报质量评分",
     "评分",
     "技术面分析",
     "基本面分析",
+    "利润分析",
+    "负债分析",
+    "现金流分析",
+    "行业景气分析",
+    "公告新闻风险",
     "入选理由",
 ]
 CACHE_PATH = Path("outputs/live-web/latest_spot.csv")
@@ -100,6 +106,7 @@ def fetch_live_spot() -> pd.DataFrame:
         if cached is not None:
             return cached
         raise RuntimeError("实时行情源暂时无响应，请稍后重新扫描。") from exc
+    spot = _enrich_financial_evidence(spot)
     _write_cached_spot(spot)
     return spot
 
@@ -279,6 +286,7 @@ def _write_cached_spot(spot: pd.DataFrame) -> None:
 def scan_live_candidates(limit: int = 5) -> tuple[dict[str, pd.DataFrame], str]:
     spot = fetch_live_spot()
     candidates = rank_live_candidates(spot, limit=limit)
+    candidates = _enrich_selected_risks(candidates)
     return candidates, datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
@@ -300,7 +308,25 @@ def _normalize_spot(spot: pd.DataFrame) -> pd.DataFrame:
         if column not in df.columns:
             df[column] = 0.0
         df[column] = pd.to_numeric(df[column], errors="coerce").fillna(0.0)
+    for column in [
+        "净利润",
+        "营收",
+        "净利润同比",
+        "资产负债率",
+        "经营现金流",
+        "利润评分",
+        "负债评分",
+        "现金流评分",
+        "财报质量评分",
+    ]:
+        if column not in df.columns:
+            df[column] = 0.0
+        df[column] = pd.to_numeric(df[column], errors="coerce").fillna(0.0)
     for column in ["代码", "名称"]:
+        if column not in df.columns:
+            df[column] = ""
+        df[column] = df[column].astype(str)
+    for column in ["行业"]:
         if column not in df.columns:
             df[column] = ""
         df[column] = df[column].astype(str)
@@ -318,7 +344,8 @@ def _short_scores(df: pd.DataFrame) -> tuple[pd.Series, pd.Series, pd.Series]:
     fundamental = (
         _valuation_score(df["市盈率-动态"], 5, 60) * 0.45
         + _valuation_score(df["市净率"], 0.5, 8) * 0.35
-        + _clip_score(df["总市值"], 10_000_000_000, 300_000_000_000) * 0.20
+        + _clip_score(df["总市值"], 10_000_000_000, 300_000_000_000) * 0.10
+        + df["财报质量评分"].clip(0, 100) * 0.10
     )
     return technical, fundamental, technical * 0.8 + fundamental * 0.2
 
@@ -330,9 +357,12 @@ def _mid_scores(df: pd.DataFrame) -> tuple[pd.Series, pd.Series, pd.Series]:
         + _clip_score(df["换手率"], 0.8, 5) * 0.20
     )
     fundamental = (
-        _valuation_score(df["市盈率-动态"], 5, 45) * 0.40
-        + _valuation_score(df["市净率"], 0.5, 5) * 0.35
-        + _clip_score(df["总市值"], 20_000_000_000, 500_000_000_000) * 0.25
+        _valuation_score(df["市盈率-动态"], 5, 45) * 0.25
+        + _valuation_score(df["市净率"], 0.5, 5) * 0.25
+        + _clip_score(df["总市值"], 20_000_000_000, 500_000_000_000) * 0.15
+        + df["利润评分"].clip(0, 100) * 0.15
+        + df["负债评分"].clip(0, 100) * 0.10
+        + df["现金流评分"].clip(0, 100) * 0.10
     )
     return technical, fundamental, technical * 0.55 + fundamental * 0.45
 
@@ -344,9 +374,12 @@ def _long_scores(df: pd.DataFrame) -> tuple[pd.Series, pd.Series, pd.Series]:
         + _clip_score(df["涨跌幅"], -2, 3) * 0.10
     )
     fundamental = (
-        _clip_score(df["总市值"], 30_000_000_000, 500_000_000_000) * 0.30
-        + _valuation_score(df["市盈率-动态"], 5, 30) * 0.40
-        + _valuation_score(df["市净率"], 0.5, 3) * 0.30
+        _clip_score(df["总市值"], 30_000_000_000, 500_000_000_000) * 0.20
+        + _valuation_score(df["市盈率-动态"], 5, 30) * 0.20
+        + _valuation_score(df["市净率"], 0.5, 3) * 0.15
+        + df["利润评分"].clip(0, 100) * 0.20
+        + df["负债评分"].clip(0, 100) * 0.10
+        + df["现金流评分"].clip(0, 100) * 0.15
     )
     return technical, fundamental, technical * 0.25 + fundamental * 0.75
 
@@ -362,11 +395,17 @@ def _rank_period(
     result = df.copy()
     result["技术面评分"] = technical_score.round(2)
     result["基本面评分"] = fundamental_score.round(2)
+    result["财报质量评分"] = result["财报质量评分"].round(2)
     result["评分"] = score.round(2)
     result["看涨评分"] = (50 + result["评分"] * 0.45).clip(0, 95).round(1)
     result["周期"] = period
     result["技术面分析"] = result.apply(_technical_analysis, axis=1)
     result["基本面分析"] = result.apply(_fundamental_analysis, axis=1)
+    result["利润分析"] = result.apply(_profit_analysis, axis=1)
+    result["负债分析"] = result.apply(_debt_analysis, axis=1)
+    result["现金流分析"] = result.apply(_cashflow_analysis, axis=1)
+    result["行业景气分析"] = result.apply(_industry_analysis, axis=1)
+    result["公告新闻风险"] = "公告/新闻风险：等待近期公告抓取。"
     result["入选理由"] = result.apply(lambda row: _reason(row, period), axis=1)
     result = result[result["评分"] > 0].sort_values("评分", ascending=False).head(limit).copy()
     result["排名"] = range(1, len(result) + 1)
@@ -435,3 +474,185 @@ def _fundamental_analysis(row: pd.Series) -> str:
     if market_cap > 0:
         points.append(f"总市值约 {market_cap / 100_000_000:.0f} 亿元")
     return "基本面：" + "；".join(points[:3]) + "。"
+
+
+def _profit_analysis(row: pd.Series) -> str:
+    profit = row["净利润"]
+    revenue = row["营收"]
+    growth = row["净利润同比"]
+    if profit == 0 and revenue == 0:
+        return "利润：未取得可靠利润表数据。"
+    parts = [f"净利润约 {profit / 100_000_000:.1f} 亿元", f"营收约 {revenue / 100_000_000:.1f} 亿元"]
+    if growth:
+        parts.append(f"净利润同比 {growth:.1f}%")
+    return "利润：" + "；".join(parts) + "。"
+
+
+def _debt_analysis(row: pd.Series) -> str:
+    debt_ratio = row["资产负债率"]
+    if debt_ratio == 0:
+        return "负债：未取得可靠资产负债表数据。"
+    level = "偏高，需结合行业特征判断" if debt_ratio > 70 else "处于规则可接受区间"
+    return f"负债：资产负债率约 {debt_ratio:.1f}%，{level}。"
+
+
+def _cashflow_analysis(row: pd.Series) -> str:
+    cashflow = row["经营现金流"]
+    if cashflow == 0:
+        return "现金流：未取得可靠现金流量表数据。"
+    direction = "为正，对经营质量有支持" if cashflow > 0 else "为负，需要进一步核查经营质量"
+    return f"现金流：经营现金流约 {cashflow / 100_000_000:.1f} 亿元，{direction}。"
+
+
+def _industry_analysis(row: pd.Series) -> str:
+    industry = row.get("行业", "")
+    if not industry:
+        return "行业景气：未取得可靠行业数据，暂不做景气判断。"
+    return f"行业景气：所属行业为 {industry}；当前版本仅识别行业归属，尚未接入行业景气指数。"
+
+
+def _enrich_financial_evidence(spot: pd.DataFrame) -> pd.DataFrame:
+    if spot.empty or "代码" not in spot.columns:
+        return spot
+    codes = sorted({str(code).zfill(6) for code in spot["代码"].dropna().astype(str)})
+    if not codes:
+        return spot
+    try:
+        income = _fetch_financial_report("RPT_DMSK_FN_INCOME", codes)
+        balance = _fetch_financial_report("RPT_DMSK_FN_BALANCE", codes)
+        cashflow = _fetch_financial_report("RPT_DMSK_FN_CASHFLOW", codes)
+    except Exception:
+        return spot
+
+    enriched = spot.copy()
+    for frame in (income, balance, cashflow):
+        if not frame.empty:
+            enriched = enriched.merge(frame, on="代码", how="left")
+    return _score_financial_evidence(enriched)
+
+
+def _fetch_financial_report(report_name: str, codes: list[str]) -> pd.DataFrame:
+    filter_codes = ",".join(f'"{code}"' for code in codes)
+    params = {
+        "sortColumns": "REPORT_DATE",
+        "sortTypes": "-1",
+        "pageSize": min(max(len(codes) * 4, 50), 500),
+        "pageNumber": 1,
+        "reportName": report_name,
+        "columns": "ALL",
+        "filter": f"(SECURITY_CODE in ({filter_codes}))",
+    }
+    response = requests.get(
+        "https://datacenter-web.eastmoney.com/api/data/v1/get",
+        params=params,
+        timeout=20,
+        headers={"User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/"},
+    )
+    response.raise_for_status()
+    rows = ((response.json().get("result") or {}).get("data") or [])
+    if not rows:
+        return pd.DataFrame(columns=["代码"])
+    frame = pd.DataFrame(rows)
+    frame = frame.sort_values("REPORT_DATE", ascending=False).drop_duplicates("SECURITY_CODE")
+    if report_name == "RPT_DMSK_FN_INCOME":
+        return frame.rename(
+            columns={
+                "SECURITY_CODE": "代码",
+                "PARENT_NETPROFIT": "净利润",
+                "TOTAL_OPERATE_INCOME": "营收",
+                "PARENT_NETPROFIT_RATIO": "净利润同比",
+                "INDUSTRY_NAME": "行业",
+            }
+        )[["代码", "净利润", "营收", "净利润同比", "行业"]]
+    if report_name == "RPT_DMSK_FN_BALANCE":
+        result = frame.rename(
+            columns={
+                "SECURITY_CODE": "代码",
+                "TOTAL_ASSETS": "总资产",
+                "TOTAL_LIABILITIES": "总负债",
+                "DEBT_ASSET_RATIO": "资产负债率",
+            }
+        )[["代码", "总资产", "总负债", "资产负债率"]]
+        missing = pd.to_numeric(result["资产负债率"], errors="coerce").isna()
+        result.loc[missing, "资产负债率"] = (
+            pd.to_numeric(result.loc[missing, "总负债"], errors="coerce")
+            / pd.to_numeric(result.loc[missing, "总资产"], errors="coerce")
+            * 100
+        )
+        return result[["代码", "资产负债率"]]
+    if report_name == "RPT_DMSK_FN_CASHFLOW":
+        return frame.rename(
+            columns={
+                "SECURITY_CODE": "代码",
+                "NETCASH_OPERATE": "经营现金流",
+            }
+        )[["代码", "经营现金流"]]
+    return pd.DataFrame(columns=["代码"])
+
+
+def _score_financial_evidence(frame: pd.DataFrame) -> pd.DataFrame:
+    result = frame.copy()
+    for column in ["净利润", "营收", "净利润同比", "资产负债率", "经营现金流"]:
+        if column not in result.columns:
+            result[column] = 0.0
+        result[column] = pd.to_numeric(result[column], errors="coerce").fillna(0.0)
+    if "行业" not in result.columns:
+        result["行业"] = ""
+    result["行业"] = result["行业"].fillna("").astype(str)
+    margin = (result["净利润"] / result["营收"].where(result["营收"] != 0)).fillna(0.0) * 100
+    result["利润评分"] = (
+        _clip_score(result["净利润"], 0, 20_000_000_000) * 0.45
+        + _clip_score(margin, 0, 25) * 0.35
+        + _clip_score(result["净利润同比"], -30, 30) * 0.20
+    )
+    result["负债评分"] = (100 - _clip_score(result["资产负债率"], 30, 90)).clip(0, 100)
+    result["现金流评分"] = _clip_score(result["经营现金流"], -5_000_000_000, 20_000_000_000)
+    result["财报质量评分"] = (
+        result["利润评分"] * 0.45 + result["负债评分"] * 0.25 + result["现金流评分"] * 0.30
+    )
+    return result
+
+
+def _enrich_selected_risks(candidates: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
+    enriched = {}
+    for period, frame in candidates.items():
+        if frame.empty:
+            enriched[period] = frame
+            continue
+        result = frame.copy()
+        result["公告新闻风险"] = result["代码"].astype(str).apply(_announcement_risk_analysis)
+        enriched[period] = result
+    return enriched
+
+
+def _announcement_risk_analysis(code: str) -> str:
+    try:
+        titles = _fetch_recent_announcement_titles(str(code).zfill(6))
+    except Exception:
+        return "公告/新闻风险：未取得可靠近期公告数据。"
+    if not titles:
+        return "公告/新闻风险：近期公告标题未见明显风险词。"
+    risk_words = ("处罚", "问询", "立案", "诉讼", "仲裁", "减持", "亏损", "退市", "风险", "终止")
+    risky = [title for title in titles if any(word in title for word in risk_words)]
+    if risky:
+        return "公告/新闻风险：近期公告含风险词，需核查：" + "；".join(risky[:2]) + "。"
+    return "公告/新闻风险：近期公告标题未见明显风险词。"
+
+
+def _fetch_recent_announcement_titles(code: str) -> list[str]:
+    response = requests.get(
+        "https://np-anotice-stock.eastmoney.com/api/security/ann",
+        params={
+            "sr": "-1",
+            "page_size": "5",
+            "page_index": "1",
+            "ann_type": "A",
+            "client_source": "web",
+            "stock_list": code,
+        },
+        timeout=12,
+        headers={"User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/"},
+    )
+    response.raise_for_status()
+    rows = ((response.json().get("data") or {}).get("list") or [])
+    return [str(row.get("title", "")) for row in rows if row.get("title")]

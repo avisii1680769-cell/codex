@@ -173,6 +173,11 @@ def _candidate_cards(frame: pd.DataFrame) -> str:
               </div>
               <p class="analysis">{html.escape(str(row.get("技术面分析", "")))}</p>
               <p class="analysis">{html.escape(str(row.get("基本面分析", "")))}</p>
+              <p class="analysis">{html.escape(str(row.get("利润分析", "")))}</p>
+              <p class="analysis">{html.escape(str(row.get("负债分析", "")))}</p>
+              <p class="analysis">{html.escape(str(row.get("现金流分析", "")))}</p>
+              <p class="analysis">{html.escape(str(row.get("行业景气分析", "")))}</p>
+              <p class="analysis">{html.escape(str(row.get("公告新闻风险", "")))}</p>
               <p class="hint">{html.escape(str(row.get("入选理由", "")))}</p>
             </article>
             """

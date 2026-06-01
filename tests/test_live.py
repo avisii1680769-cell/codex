@@ -48,9 +48,15 @@ def test_rank_live_candidates_returns_stable_columns_for_empty_input():
         "看涨评分",
         "技术面评分",
         "基本面评分",
+        "财报质量评分",
         "评分",
         "技术面分析",
         "基本面分析",
+        "利润分析",
+        "负债分析",
+        "现金流分析",
+        "行业景气分析",
+        "公告新闻风险",
         "入选理由",
     ]
 
@@ -69,6 +75,12 @@ def test_rank_live_candidates_uses_technical_and_fundamental_scores():
             "市盈率-动态": [18.0, 120.0],
             "市净率": [1.4, 12.0],
             "总市值": [120_000_000_000, 5_000_000_000],
+            "净利润": [5_000_000_000, -300_000_000],
+            "营收": [30_000_000_000, 2_000_000_000],
+            "净利润同比": [12.0, -40.0],
+            "资产负债率": [45.0, 92.0],
+            "经营现金流": [4_000_000_000, -2_000_000_000],
+            "行业": ["银行", "高风险行业"],
         }
     )
 
@@ -80,6 +92,30 @@ def test_rank_live_candidates_uses_technical_and_fundamental_scores():
     assert first_mid["基本面评分"] > 0
     assert "技术面：" in first_mid["技术面分析"]
     assert "基本面：" in first_mid["基本面分析"]
+    assert "利润：" in first_mid["利润分析"]
+    assert "负债：" in first_mid["负债分析"]
+    assert "现金流：" in first_mid["现金流分析"]
+    assert "行业景气：" in first_mid["行业景气分析"]
+
+
+def test_enrich_selected_risks_adds_announcement_risk(monkeypatch):
+    candidates = {
+        "短期": pd.DataFrame(
+            {
+                "代码": ["000001"],
+                "名称": ["风险股"],
+                "周期": ["短期"],
+                "排名": [1],
+            }
+        )
+    }
+
+    monkeypatch.setattr(live, "_fetch_recent_announcement_titles", lambda code: ["公司收到监管问询函"])
+
+    enriched = live._enrich_selected_risks(candidates)
+
+    assert "公告新闻风险" in enriched["短期"].columns
+    assert "风险词" in enriched["短期"].iloc[0]["公告新闻风险"]
 
 
 def test_fetch_live_spot_tries_next_eastmoney_host_before_cache(monkeypatch):
@@ -94,6 +130,7 @@ def test_fetch_live_spot_tries_next_eastmoney_host_before_cache(monkeypatch):
         return sample
 
     monkeypatch.setattr(live, "_fetch_eastmoney_spot", fake_fetch)
+    monkeypatch.setattr(live, "_enrich_financial_evidence", lambda spot: spot)
     monkeypatch.setattr(live, "_read_cached_spot", lambda: None)
     monkeypatch.setattr(live, "_write_cached_spot", writes.append)
 
@@ -140,6 +177,7 @@ def test_fetch_live_spot_uses_tencent_source_before_cache(monkeypatch):
 
     monkeypatch.setattr(live, "_fetch_eastmoney_spot", fake_fetch)
     monkeypatch.setattr(live, "_fetch_tencent_spot", lambda: sample)
+    monkeypatch.setattr(live, "_enrich_financial_evidence", lambda spot: spot)
     monkeypatch.setattr(live, "_read_cached_spot", fail_if_cache_is_used)
     monkeypatch.setattr(live, "_write_cached_spot", lambda spot: None)
 
