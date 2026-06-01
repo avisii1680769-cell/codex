@@ -30,7 +30,9 @@ Start the local browser UI:
 stock-bullish web --host 127.0.0.1 --port 8765 --output-dir outputs/web
 ```
 
-Then open `http://127.0.0.1:8765`, upload a CSV or Parquet market-data file, choose a strategy preset, and run the backtest from the page.
+Then open `http://127.0.0.1:8765` and click `实时扫描`. The page fetches a live A-share market snapshot, then shows short-term, mid-term, and long-term bullish candidates. No market-data upload is required.
+
+The live page is a research scanner. Its `看涨概率` is a score-derived ranking value, not a guaranteed future probability and not investment advice.
 
 The command writes:
 

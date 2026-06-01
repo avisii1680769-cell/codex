@@ -1,32 +1,38 @@
 import pandas as pd
 
-from stock_bullish.web import render_home_page, render_result_page
+from stock_bullish.web import render_home_page, render_live_result_page
 
 
-def test_render_home_page_contains_upload_form_and_strategy_options():
+def test_render_home_page_is_chinese_live_scanner_without_upload_form():
     html = render_home_page()
 
-    assert 'type="file"' in html
-    assert 'name="strategy_name"' in html
-    assert "trend_volume" in html
-    assert "运行回测" in html
+    assert 'type="file"' not in html
+    assert "实时扫描" in html
+    assert "短期" in html
+    assert "中期" in html
+    assert "长期" in html
 
 
-def test_render_result_page_contains_summary_and_download_links(tmp_path):
-    summary = pd.DataFrame(
-        {
-            "strategy": ["trend_volume"],
-            "window": [5],
-            "sample_count": [1],
-        }
-    )
-    paths = {
-        "summary_csv": tmp_path / "summary.csv",
-        "signals_csv": tmp_path / "signals.csv",
+def test_render_live_result_page_contains_candidate_sections():
+    candidates = {
+        "短期": pd.DataFrame(
+            {
+                "周期": ["短期"],
+                "排名": [1],
+                "代码": ["000001"],
+                "名称": ["强势股"],
+                "看涨概率": [72.5],
+                "评分": [82.0],
+                "入选理由": ["量比活跃"],
+            }
+        ),
+        "中期": pd.DataFrame(),
+        "长期": pd.DataFrame(),
     }
 
-    html = render_result_page(summary=summary, stability=pd.DataFrame(), paths=paths)
+    html = render_live_result_page(candidates=candidates, updated_at="2026-06-01 10:00:00")
 
-    assert "trend_volume" in html
-    assert "summary.csv" in html
-    assert "/download/summary_csv" in html
+    assert "短期候选" in html
+    assert "中期候选" in html
+    assert "长期候选" in html
+    assert "强势股" in html

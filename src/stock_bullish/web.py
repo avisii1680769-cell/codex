@@ -1,23 +1,18 @@
 from __future__ import annotations
 
 import html
-import tempfile
-from email.parser import BytesParser
-from email.policy import default
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote
 
 import pandas as pd
 
-from stock_bullish.research import ResearchOutput, run_research
-from stock_bullish.strategy import PRESET_STRATEGIES
+from stock_bullish.live import PERIODS, scan_live_candidates
 
 PAGE_STYLE = """
-body{margin:0;font-family:Arial,'Microsoft YaHei',sans-serif;background:#f5f7fb;color:#1f2937}
+body{margin:0;font-family:Arial,'Microsoft YaHei',sans-serif;background:#f5f7fb;color:#172026}
 header{background:#12343b;color:white;padding:22px 32px}
-main{padding:24px 32px;max-width:1180px;margin:0 auto}
+main{padding:24px 32px;max-width:1240px;margin:0 auto}
 .panel{background:white;border:1px solid #d9e2ec;border-radius:8px;padding:18px;margin-bottom:18px}
 .row{display:flex;gap:12px;align-items:end;flex-wrap:wrap}
 label{display:block;font-size:13px;font-weight:700;margin-bottom:6px}
@@ -27,169 +22,112 @@ button:hover{background:#115e59}
 table{border-collapse:collapse;width:100%;font-size:13px;background:white}
 th,td{border:1px solid #d9e2ec;padding:7px 8px;text-align:left;white-space:nowrap}
 th{background:#e6f0f2}
-.table-wrap{overflow:auto;max-height:420px;border:1px solid #d9e2ec;border-radius:6px}
-.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.table-wrap{overflow:auto;max-height:520px;border:1px solid #d9e2ec;border-radius:6px}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
 .metric{background:#eef7f6;border:1px solid #c7e2de;border-radius:8px;padding:12px}
-.metric strong{display:block;font-size:20px;color:#0f766e}
-.links a{display:inline-block;margin:0 8px 8px 0;color:#0f766e;font-weight:700}
+.metric strong{display:block;font-size:22px;color:#0f766e}
 .error{border-color:#f5c2c7;background:#fff5f5;color:#842029}
 .hint{color:#52616b;font-size:13px;line-height:1.5}
+.risk{background:#fff8e6;border-color:#f3d19e}
+.actions a{color:#0f766e;font-weight:700}
 """
 
 
 def render_home_page(error: str | None = None) -> str:
-    strategy_options = "\n".join(
-        [
-            '<option value="all">all - 全部预设</option>',
-            *[
-                f'<option value="{html.escape(name)}">{html.escape(name)}</option>'
-                for name in PRESET_STRATEGIES
-            ],
-        ]
-    )
     error_html = f'<section class="panel error">{html.escape(error)}</section>' if error else ""
     return _page(
-        "A 股看涨回测工具",
+        "A 股实时看涨候选工具",
         f"""
         {error_html}
         <section class="panel">
-          <form action="/run" method="post" enctype="multipart/form-data">
+          <form action="/scan" method="post">
             <div class="row">
               <div>
-                <label for="market_file">行情文件 CSV / Parquet</label>
-                <input id="market_file" name="market_file" type="file" accept=".csv,.parquet,.pq" required>
+                <label for="limit">每个周期显示数量</label>
+                <input id="limit" name="limit" type="number" min="5" max="100" value="20">
               </div>
-              <div>
-                <label for="strategy_name">策略预设</label>
-                <select id="strategy_name" name="strategy_name">{strategy_options}</select>
-              </div>
-              <button type="submit">运行回测</button>
+              <button type="submit">实时扫描</button>
             </div>
           </form>
-          <p class="hint">文件至少包含 trade_date, symbol, open, high, low, close, volume, amount。推荐使用 examples/market_data_template.csv 作为模板。</p>
+          <p class="hint">页面会自动联网获取 A 股实时行情快照，并按短期、中期、长期三套规则生成候选列表；不需要上传行情文件。</p>
+        </section>
+        <section class="panel risk">
+          <h2>重要提示</h2>
+          <p>这里展示的是基于实时行情字段的量化候选和评分，不是投资建议，也不是收益承诺。看涨概率是评分映射值，用于排序参考，不等于真实未来上涨概率。</p>
         </section>
         <section class="panel">
-          <h2>内置策略</h2>
-          <div class="table-wrap">
-            <table>
-              <thead><tr><th>策略</th><th>条件</th><th>最少命中</th></tr></thead>
-              <tbody>{_strategy_rows()}</tbody>
-            </table>
-          </div>
+          <h2>周期说明</h2>
+          <ul>
+            <li>短期：更看重量比、涨跌幅、换手率和成交额。</li>
+            <li>中期：兼顾价格强度、成交活跃度和估值不过热。</li>
+            <li>长期：更看重流动性、市值稳定性和估值合理性。</li>
+          </ul>
         </section>
         """,
     )
 
 
-def render_result_page(
-    summary: pd.DataFrame,
-    stability: pd.DataFrame,
-    paths: dict[str, Path],
-) -> str:
+def render_live_result_page(candidates: dict[str, pd.DataFrame], updated_at: str) -> str:
+    total = sum(len(frame) for frame in candidates.values())
     return _page(
-        "回测结果",
+        "实时扫描结果",
         f"""
         <section class="panel">
           <div class="metrics">
-            <div class="metric"><span>策略窗口</span><strong>{len(summary)}</strong></div>
-            <div class="metric"><span>总样本</span><strong>{_sample_count(summary)}</strong></div>
-            <div class="metric"><span>稳定性分组</span><strong>{len(stability)}</strong></div>
+            <div class="metric"><span>更新时间</span><strong>{html.escape(updated_at)}</strong></div>
+            <div class="metric"><span>候选总数</span><strong>{total}</strong></div>
+            <div class="metric"><span>覆盖周期</span><strong>短 / 中 / 长</strong></div>
           </div>
         </section>
-        <section class="panel links">
-          <h2>下载结果</h2>
-          {_download_links(paths)}
+        <section class="panel risk">
+          <p>候选列表仅供研究和复盘。请结合数据质量、市场环境、仓位管理和个人风险承受能力独立判断。</p>
         </section>
-        <section class="panel">
-          <h2>策略汇总</h2>
-          {_frame_table(summary)}
-        </section>
-        <section class="panel">
-          <h2>稳定性分组</h2>
-          {_frame_table(stability)}
-        </section>
-        <section class="panel"><a href="/">返回重新上传</a></section>
+        {_candidate_sections(candidates)}
+        <section class="panel actions"><a href="/">返回重新扫描</a></section>
         """,
     )
 
 
 def serve(host: str = "127.0.0.1", port: int = 8765, output_dir: str | Path = "outputs/web") -> None:
-    output_root = Path(output_dir)
-    output_root.mkdir(parents=True, exist_ok=True)
-    state: dict[str, Path] = {}
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             if self.path == "/":
                 self._send_html(render_home_page())
                 return
-            if self.path.startswith("/download/"):
-                self._send_download(state)
-                return
             self.send_error(HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:
-            if self.path != "/run":
+            if self.path != "/scan":
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
             try:
-                output = self._run_uploaded_file(output_root)
+                limit = self._read_limit()
+                candidates, updated_at = scan_live_candidates(limit=limit)
             except Exception as exc:  # noqa: BLE001
                 self._send_html(render_home_page(str(exc)), status=HTTPStatus.BAD_REQUEST)
                 return
-            state.clear()
-            state.update(output.paths)
-            self._send_html(render_result_page(output.summary, output.stability, output.paths))
+            self._send_html(render_live_result_page(candidates, updated_at))
 
         def log_message(self, format: str, *args: object) -> None:
             return
 
-        def _run_uploaded_file(self, output_root: Path) -> ResearchOutput:
+        def _read_limit(self) -> int:
             length = int(self.headers.get("Content-Length", "0"))
-            content_type = self.headers.get("Content-Type", "")
-            body = self.rfile.read(length)
-            message = BytesParser(policy=default).parsebytes(
-                f"Content-Type: {content_type}\r\n\r\n".encode() + body
-            )
-            fields = {
-                part.get_param("name", header="content-disposition"): part
-                for part in message.iter_parts()
-            }
-            file_part = fields.get("market_file")
-            if file_part is None or not file_part.get_filename():
-                raise ValueError("请上传 CSV 或 Parquet 行情文件。")
-            strategy_part = fields.get("strategy_name")
-            strategy_name = "all"
-            if strategy_part is not None:
-                strategy_name = strategy_part.get_content().strip() or "all"
-
-            filename = Path(file_part.get_filename()).name
-            suffix = Path(filename).suffix or ".csv"
-            upload_dir = Path(tempfile.mkdtemp(prefix="stock_bullish_upload_"))
-            upload_path = upload_dir / f"market_data{suffix}"
-            payload = file_part.get_payload(decode=True)
-            upload_path.write_bytes(payload or b"")
-            run_dir = output_root / "latest"
-            return run_research(upload_path, run_dir, strategy_name=strategy_name)
+            body = self.rfile.read(length).decode("utf-8", errors="ignore")
+            for item in body.split("&"):
+                if item.startswith("limit="):
+                    try:
+                        return min(max(int(item.split("=", 1)[1]), 5), 100)
+                    except ValueError:
+                        return 20
+            return 20
 
         def _send_html(self, content: str, status: HTTPStatus = HTTPStatus.OK) -> None:
             payload = content.encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
-
-        def _send_download(self, paths: dict[str, Path]) -> None:
-            key = unquote(self.path.rsplit("/", 1)[-1])
-            path = paths.get(key)
-            if path is None or not path.exists():
-                self.send_error(HTTPStatus.NOT_FOUND)
-                return
-            payload = path.read_bytes()
-            self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", "text/csv; charset=utf-8")
-            self.send_header("Content-Disposition", f'attachment; filename="{path.name}"')
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
@@ -209,43 +147,31 @@ def _page(title: str, body: str) -> str:
   <style>{PAGE_STYLE}</style>
 </head>
 <body>
-  <header><h1>{html.escape(title)}</h1><p>历史回测研究工具，不构成投资建议。</p></header>
+  <header><h1>{html.escape(title)}</h1><p>自动扫描 A 股实时行情，展示短期、中期、长期看涨候选。</p></header>
   <main>{body}</main>
 </body>
 </html>"""
 
 
-def _strategy_rows() -> str:
-    rows = []
-    for name, rule in PRESET_STRATEGIES.items():
-        rows.append(
-            "<tr>"
-            f"<td>{html.escape(name)}</td>"
-            f"<td>{html.escape(', '.join(rule.conditions))}</td>"
-            f"<td>{rule.min_score or len(rule.conditions)}</td>"
-            "</tr>"
+def _candidate_sections(candidates: dict[str, pd.DataFrame]) -> str:
+    sections = []
+    for period in PERIODS:
+        frame = candidates.get(period, pd.DataFrame())
+        sections.append(
+            f"""
+            <section class="panel">
+              <h2>{period}候选</h2>
+              {_frame_table(frame)}
+            </section>
+            """
         )
-    return "\n".join(rows)
+    return "\n".join(sections)
 
 
-def _download_links(paths: dict[str, Path]) -> str:
-    links = []
-    for key, path in paths.items():
-        links.append(f'<a href="/download/{html.escape(key)}">{html.escape(path.name)}</a>')
-    return "\n".join(links)
-
-
-def _frame_table(frame: pd.DataFrame, max_rows: int = 50) -> str:
+def _frame_table(frame: pd.DataFrame) -> str:
     if frame.empty:
-        return '<p class="hint">暂无数据。</p>'
-    preview = frame.head(max_rows)
-    return f'<div class="table-wrap">{preview.to_html(index=False, escape=True)}</div>'
-
-
-def _sample_count(summary: pd.DataFrame) -> int:
-    if "sample_count" not in summary.columns or summary.empty:
-        return 0
-    return int(summary["sample_count"].fillna(0).sum())
+        return '<p class="hint">暂无符合条件的数据。</p>'
+    return f'<div class="table-wrap">{frame.to_html(index=False, escape=True)}</div>'
 
 
 def main() -> None:
