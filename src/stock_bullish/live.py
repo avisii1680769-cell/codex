@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
+import time
 
 import pandas as pd
 import requests
@@ -21,22 +23,23 @@ LIVE_COLUMNS = [
     "评分",
     "入选理由",
 ]
+CACHE_PATH = Path("outputs/live-web/latest_spot.csv")
 
 
 def fetch_live_spot() -> pd.DataFrame:
     try:
-        import akshare as ak
-    except ImportError as exc:
-        raise RuntimeError("缺少 akshare，请先运行：python -m pip install akshare") from exc
-
-    try:
-        return ak.stock_zh_a_spot_em()
-    except Exception:
-        return _fetch_eastmoney_spot()
+        spot = _fetch_eastmoney_spot()
+    except Exception as exc:
+        cached = _read_cached_spot()
+        if cached is not None:
+            return cached
+        raise RuntimeError("实时行情源暂时无响应，请稍后重新扫描。") from exc
+    _write_cached_spot(spot)
+    return spot
 
 
 def _fetch_eastmoney_spot() -> pd.DataFrame:
-    url = "https://82.push2.eastmoney.com/api/qt/clist/get"
+    url = "https://push2.eastmoney.com/api/qt/clist/get"
     session = requests.Session()
     session.trust_env = False
     rows = []
@@ -53,8 +56,9 @@ def _fetch_eastmoney_spot() -> pd.DataFrame:
             "fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048",
             "fields": "f2,f3,f6,f7,f8,f10,f12,f14,f20,f23,f115",
         }
-        response = session.get(url, params=params, timeout=15)
-        response.raise_for_status()
+        response = _get_with_retry(session, url, params)
+        if response is None:
+            break
         data = response.json().get("data") or {}
         diff = data.get("diff") or []
         if not diff:
@@ -80,6 +84,40 @@ def _fetch_eastmoney_spot() -> pd.DataFrame:
             "f115": "市盈率-动态",
         }
     )
+
+
+def _get_with_retry(
+    session: requests.Session,
+    url: str,
+    params: dict[str, object],
+    attempts: int = 3,
+) -> requests.Response | None:
+    for attempt in range(attempts):
+        try:
+            response = session.get(url, params=params, timeout=15)
+            response.raise_for_status()
+            return response
+        except requests.RequestException:
+            if attempt < attempts - 1:
+                time.sleep(1 + attempt)
+    return None
+
+
+def _read_cached_spot() -> pd.DataFrame | None:
+    if not CACHE_PATH.exists():
+        return None
+    try:
+        return pd.read_csv(CACHE_PATH)
+    except Exception:
+        return None
+
+
+def _write_cached_spot(spot: pd.DataFrame) -> None:
+    try:
+        CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        spot.to_csv(CACHE_PATH, index=False, encoding="utf-8-sig")
+    except Exception:
+        return
 
 
 def scan_live_candidates(limit: int = 20) -> tuple[dict[str, pd.DataFrame], str]:

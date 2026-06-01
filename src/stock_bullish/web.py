@@ -96,14 +96,19 @@ def serve(host: str = "127.0.0.1", port: int = 8765, output_dir: str | Path = "o
             if self.path == "/":
                 self._send_html(render_home_page())
                 return
+            if self.path == "/scan":
+                self._run_scan(limit=20)
+                return
             self.send_error(HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:
             if self.path != "/scan":
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
+            self._run_scan(limit=self._read_limit())
+
+        def _run_scan(self, limit: int) -> None:
             try:
-                limit = self._read_limit()
                 candidates, updated_at = scan_live_candidates(limit=limit)
             except Exception as exc:  # noqa: BLE001
                 self._send_html(render_home_page(str(exc)), status=HTTPStatus.BAD_REQUEST)

@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "A-share bullish signal backtesting research tool"
 requires-python = ">=3.11"
 dependencies = [
-  "akshare>=1.17",
   "numpy>=1.26",
   "pandas>=2.2",
   "pyarrow>=15.0",
