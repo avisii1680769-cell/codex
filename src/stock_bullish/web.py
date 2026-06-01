@@ -227,6 +227,7 @@ def _candidate_cards(frame: pd.DataFrame) -> str:
               <p class="analysis">{html.escape(str(row.get("主力资金流向", "")))}</p>
               <p class="analysis">{html.escape(str(row.get("支持证据", "")))}</p>
               <p class="analysis">{html.escape(str(row.get("反对证据", "")))}</p>
+              <p class="analysis">{html.escape(str(row.get("建议持仓周期", "")))}</p>
               <p class="hint">{html.escape(str(row.get("入选理由", "")))}</p>
             </article>
             """

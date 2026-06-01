@@ -74,6 +74,7 @@ def test_rank_live_candidates_returns_stable_columns_for_empty_input():
         "风险等级",
         "支持证据",
         "反对证据",
+        "建议持仓周期",
         "入选理由",
     ]
 
@@ -139,8 +140,40 @@ def test_rank_live_candidates_uses_technical_and_fundamental_scores():
     assert "主力资金：" in first_mid["主力资金流向"]
     assert "支持证据" in first_mid
     assert "反对证据" in first_mid
+    assert "建议持仓周期：" in first_mid["建议持仓周期"]
     assert first_mid["支持证据"]
     assert first_mid["反对证据"]
+
+
+def test_holding_period_advice_varies_by_period_and_risk():
+    hot_risky = pd.Series(
+        {
+            "换手率": 30.0,
+            "量比": 6.0,
+            "涨跌幅": 10.0,
+            "风险等级": "低",
+            "全网新闻舆情": "全网新闻舆情：新闻搜索结果含风险词，需核查。",
+            "反对证据": "反对：融资资金净偿还。",
+            "融资净买额": -1_000_000,
+            "互联互通增持股数": -100_000,
+        }
+    )
+    stable = pd.Series(
+        {
+            "换手率": 2.0,
+            "量比": 1.2,
+            "涨跌幅": 1.0,
+            "风险等级": "低",
+            "全网新闻舆情": "全网新闻舆情：新闻搜索结果未见明显风险词。",
+            "反对证据": "反对：暂未发现规则内的明显反对证据。",
+            "融资净买额": 1_000_000,
+            "互联互通增持股数": 100_000,
+        }
+    )
+
+    assert "1-2 个交易日" in live._holding_period_advice(hot_risky, "短期")
+    assert "4-6 周" in live._holding_period_advice(stable, "中期")
+    assert "6-12 个月" in live._holding_period_advice(stable, "长期")
 
 
 def test_enrich_selected_risks_adds_announcement_risk(monkeypatch):

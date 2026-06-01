@@ -49,6 +49,7 @@ LIVE_COLUMNS = [
     "风险等级",
     "支持证据",
     "反对证据",
+    "建议持仓周期",
     "入选理由",
 ]
 CACHE_PATH = Path("outputs/live-web/latest_spot.csv")
@@ -562,6 +563,7 @@ def _rank_period(
         result["风险等级"] = "待核查"
     result["支持证据"] = result.apply(_support_evidence, axis=1)
     result["反对证据"] = result.apply(_opposition_evidence, axis=1)
+    result["建议持仓周期"] = result.apply(lambda row: _holding_period_advice(row, period), axis=1)
     result["入选理由"] = result.apply(lambda row: _reason(row, period), axis=1)
     result = result[result["评分"] > 0].sort_values("评分", ascending=False).head(limit).copy()
     result["排名"] = range(1, len(result) + 1)
@@ -890,6 +892,51 @@ def _opposition_evidence(row: pd.Series) -> str:
     return "反对：" + "；".join(evidence[:4]) + "。"
 
 
+def _holding_period_advice(row: pd.Series, period: str) -> str:
+    turnover = _row_number(row, "换手率")
+    volume_ratio = _row_number(row, "量比")
+    change_pct = _row_number(row, "涨跌幅")
+    risk_level = str(row.get("风险等级", "待核查"))
+    news = str(row.get("全网新闻舆情", ""))
+    opposition = str(row.get("反对证据", ""))
+    margin_net = _row_number(row, "融资净买额")
+    northbound_add = _row_number(row, "互联互通增持股数")
+
+    risk_flags = 0
+    if risk_level in {"中", "高"}:
+        risk_flags += 1
+    if any(word in news for word in ("含风险词", "需核查", "异常波动", "非理性炒作", "快速下跌")):
+        risk_flags += 1
+    if any(word in opposition for word in ("净偿还", "减持", "净流出", "偏高", "样本偏少")):
+        risk_flags += 1
+    if margin_net < 0:
+        risk_flags += 1
+    if northbound_add < 0:
+        risk_flags += 1
+
+    hot_trade = turnover >= 20 or volume_ratio >= 5 or change_pct >= 9.5
+
+    if period == "短期":
+        if hot_trade or risk_flags >= 2:
+            return "建议持仓周期：1-2 个交易日；高换手或风险提示较强，必须按短线纪律观察。"
+        if risk_flags == 1:
+            return "建议持仓周期：2-3 个交易日；有分歧证据，不能无条件延长。"
+        return "建议持仓周期：3-5 个交易日；若放量延续可继续观察，否则按短线处理。"
+
+    if period == "中期":
+        if hot_trade or risk_flags >= 2:
+            return "建议持仓周期：1-2 周；短线波动较强或风险证据偏多，中期逻辑需等待确认。"
+        if risk_flags == 1:
+            return "建议持仓周期：2-4 周；边走边验证财报、资金和行业强度。"
+        return "建议持仓周期：4-6 周；适合按波段跟踪，但仍需周度复盘。"
+
+    if hot_trade or risk_flags >= 2:
+        return "建议持仓周期：1-3 个月；长期候选存在交易拥挤或风险证据，先按观察仓思路处理。"
+    if risk_flags == 1:
+        return "建议持仓周期：3-6 个月；基本面仍需季度财报和资金面继续验证。"
+    return "建议持仓周期：6-12 个月；仅在基本面、现金流和风险提示持续稳定时适用。"
+
+
 def _row_number(row: pd.Series, column: str) -> float:
     try:
         return float(row.get(column, 0) or 0)
@@ -1207,6 +1254,7 @@ def _enrich_selected_risks(candidates: dict[str, pd.DataFrame]) -> dict[str, pd.
         result["风险等级"] = risk.apply(lambda item: item[1])
         result["支持证据"] = result.apply(_support_evidence, axis=1)
         result["反对证据"] = result.apply(_opposition_evidence, axis=1)
+        result["建议持仓周期"] = result.apply(lambda row: _holding_period_advice(row, period), axis=1)
         enriched[period] = result
     return enriched
 
