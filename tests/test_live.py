@@ -25,8 +25,8 @@ def test_rank_live_candidates_scores_short_mid_long_candidates():
 
     assert set(candidates) == {"短期", "中期", "长期"}
     assert candidates["短期"].iloc[0]["代码"] == "000001"
-    assert "看涨概率" in candidates["短期"].columns
-    assert candidates["短期"].iloc[0]["看涨概率"] > candidates["短期"].iloc[1]["看涨概率"]
+    assert "看涨评分" in candidates["短期"].columns
+    assert candidates["短期"].iloc[0]["看涨评分"] > candidates["短期"].iloc[1]["看涨评分"]
     assert candidates["长期"].iloc[0]["代码"] == "000002"
 
 
@@ -45,14 +45,14 @@ def test_rank_live_candidates_returns_stable_columns_for_empty_input():
         "换手率",
         "量比",
         "振幅",
-        "看涨概率",
+        "看涨评分",
         "评分",
         "入选理由",
     ]
 
 
 def test_fetch_live_spot_tries_next_eastmoney_host_before_cache(monkeypatch):
-    sample = pd.DataFrame({"浠ｇ爜": ["000001"], "鍚嶇О": ["骞冲畨閾惰"]})
+    sample = pd.DataFrame({"代码": ["000001"], "名称": ["平安银行"]})
     attempts = []
     writes = []
 
@@ -74,7 +74,7 @@ def test_fetch_live_spot_tries_next_eastmoney_host_before_cache(monkeypatch):
 
 
 def test_fetch_live_spot_uses_cache_after_all_hosts_fail(monkeypatch):
-    cached = pd.DataFrame({"浠ｇ爜": ["600000"], "鍚嶇О": ["娴﹀彂閾惰"]})
+    cached = pd.DataFrame({"代码": ["600000"], "名称": ["浦发银行"]})
     attempts = []
 
     def fake_fetch(host: str) -> pd.DataFrame:
@@ -82,7 +82,11 @@ def test_fetch_live_spot_uses_cache_after_all_hosts_fail(monkeypatch):
         raise RuntimeError("host failed")
 
     monkeypatch.setattr(live, "_fetch_eastmoney_spot", fake_fetch)
-    monkeypatch.setattr(live, "_fetch_tencent_spot", lambda: (_ for _ in ()).throw(RuntimeError("fallback failed")), raising=False)
+    monkeypatch.setattr(
+        live,
+        "_fetch_tencent_spot",
+        lambda: (_ for _ in ()).throw(RuntimeError("fallback failed")),
+    )
     monkeypatch.setattr(live, "_read_cached_spot", lambda: cached)
     monkeypatch.setattr(live, "_write_cached_spot", lambda spot: None)
 
@@ -93,7 +97,7 @@ def test_fetch_live_spot_uses_cache_after_all_hosts_fail(monkeypatch):
 
 
 def test_fetch_live_spot_uses_tencent_source_before_cache(monkeypatch):
-    sample = pd.DataFrame({"浠ｇ爜": ["000001"], "鍚嶇О": ["骞冲畨閾惰"]})
+    sample = pd.DataFrame({"代码": ["000001"], "名称": ["平安银行"]})
     attempts = []
 
     def fake_fetch(host: str) -> pd.DataFrame:
@@ -104,7 +108,7 @@ def test_fetch_live_spot_uses_tencent_source_before_cache(monkeypatch):
         raise AssertionError("cache should not be used when tencent source works")
 
     monkeypatch.setattr(live, "_fetch_eastmoney_spot", fake_fetch)
-    monkeypatch.setattr(live, "_fetch_tencent_spot", lambda: sample, raising=False)
+    monkeypatch.setattr(live, "_fetch_tencent_spot", lambda: sample)
     monkeypatch.setattr(live, "_read_cached_spot", fail_if_cache_is_used)
     monkeypatch.setattr(live, "_write_cached_spot", lambda spot: None)
 

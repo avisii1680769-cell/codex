@@ -19,7 +19,7 @@ LIVE_COLUMNS = [
     "换手率",
     "量比",
     "振幅",
-    "看涨概率",
+    "看涨评分",
     "评分",
     "入选理由",
 ]
@@ -336,7 +336,7 @@ def _long_score(df: pd.DataFrame) -> pd.Series:
 def _rank_period(df: pd.DataFrame, period: str, score: pd.Series, limit: int) -> pd.DataFrame:
     result = df.copy()
     result["评分"] = score.round(2)
-    result["看涨概率"] = (50 + result["评分"] * 0.45).clip(0, 95).round(1)
+    result["看涨评分"] = (50 + result["评分"] * 0.45).clip(0, 95).round(1)
     result["周期"] = period
     result["入选理由"] = result.apply(lambda row: _reason(row, period), axis=1)
     result = result[result["评分"] > 0].sort_values("评分", ascending=False).head(limit).copy()

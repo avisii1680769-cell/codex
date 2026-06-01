@@ -29,6 +29,9 @@ th{background:#e6f0f2}
 .error{border-color:#f5c2c7;background:#fff5f5;color:#842029}
 .hint{color:#52616b;font-size:13px;line-height:1.5}
 .risk{background:#fff8e6;border-color:#f3d19e}
+.truth{background:#f7fbff;border-color:#cfe3f5}
+.truth h2,.risk h2{margin-top:0}
+.truth ul,.risk ul{margin-bottom:0}
 .actions a{color:#0f766e;font-weight:700}
 """
 
@@ -36,7 +39,7 @@ th{background:#e6f0f2}
 def render_home_page(error: str | None = None) -> str:
     error_html = f'<section class="panel error">{html.escape(error)}</section>' if error else ""
     return _page(
-        "A 股实时看涨候选工具",
+        "A 股实时看涨候选评分工具",
         f"""
         {error_html}
         <section class="panel">
@@ -49,20 +52,10 @@ def render_home_page(error: str | None = None) -> str:
               <button type="submit">实时扫描</button>
             </div>
           </form>
-          <p class="hint">页面会自动联网获取 A 股实时行情快照，并按短期、中期、长期三套规则生成候选列表；不需要上传行情文件。</p>
+          <p class="hint">页面会自动联网获取 A 股实时行情快照，按短期、中期、长期三套规则生成候选列表；不需要上传行情文件。</p>
         </section>
-        <section class="panel risk">
-          <h2>重要提示</h2>
-          <p>这里展示的是基于实时行情字段的量化候选和评分，不是投资建议，也不是收益承诺。看涨概率是评分映射值，用于排序参考，不等于真实未来上涨概率。</p>
-        </section>
-        <section class="panel">
-          <h2>周期说明</h2>
-          <ul>
-            <li>短期：更看重量比、涨跌幅、换手率和成交额。</li>
-            <li>中期：兼顾价格强度、成交活跃度和估值不过热。</li>
-            <li>长期：更看重流动性、市值稳定性和估值合理性。</li>
-          </ul>
-        </section>
+        {_model_truth_panel()}
+        {_period_explanation_panel()}
         """,
     )
 
@@ -80,9 +73,11 @@ def render_live_result_page(candidates: dict[str, pd.DataFrame], updated_at: str
           </div>
         </section>
         <section class="panel risk">
-          <p>候选列表仅供研究和复盘。请结合数据质量、市场环境、仓位管理和个人风险承受能力独立判断。</p>
+          <h2>使用边界</h2>
+          <p>候选列表是规则评分，不是买入建议，也不是收益承诺。看涨评分用于排序参考，不代表真实未来上涨概率。</p>
         </section>
         {_candidate_sections(candidates)}
+        {_model_truth_panel()}
         <section class="panel actions"><a href="/">返回重新扫描</a></section>
         """,
     )
@@ -152,10 +147,40 @@ def _page(title: str, body: str) -> str:
   <style>{PAGE_STYLE}</style>
 </head>
 <body>
-  <header><h1>{html.escape(title)}</h1><p>自动扫描 A 股实时行情，展示短期、中期、长期看涨候选。</p></header>
+  <header><h1>{html.escape(title)}</h1><p>自动扫描 A 股实时行情，展示短期、中期、长期看涨候选评分。</p></header>
   <main>{body}</main>
 </body>
 </html>"""
+
+
+def _model_truth_panel() -> str:
+    return """
+    <section class="panel truth">
+      <h2>模型说明</h2>
+      <p><strong>看涨评分是规则评分，不是预测概率。</strong> 当前版本根据实时行情字段做初筛排序，适合研究和复盘，不适合直接作为交易依据。</p>
+      <h2>数据来源与覆盖范围</h2>
+      <p>实时行情优先使用东方财富接口；接口波动时切换到腾讯行情备用源。备用源目前使用一组高流动性观察池，不等同于全市场完整扫描。</p>
+      <h2>未纳入因素</h2>
+      <ul>
+        <li>未纳入财报质量、行业景气度、公告事件、资金流、历史 K 线形态和新闻风险。</li>
+        <li>未按行业校准市盈率和市净率阈值，周期股、银行股、科技股可能被同一规则误判。</li>
+        <li>当前权重来自透明经验规则，还没有用历史回测校准为真实成功率。</li>
+      </ul>
+    </section>
+    """
+
+
+def _period_explanation_panel() -> str:
+    return """
+    <section class="panel">
+      <h2>周期说明</h2>
+      <ul>
+        <li>短期：更看重量比、涨跌幅、换手率和成交额。</li>
+        <li>中期：兼顾价格强度、成交活跃度和估值不过热。</li>
+        <li>长期：更看重流动性、市值稳定性和估值合理性。</li>
+      </ul>
+    </section>
+    """
 
 
 def _candidate_sections(candidates: dict[str, pd.DataFrame]) -> str:
