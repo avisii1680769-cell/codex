@@ -665,18 +665,54 @@ def _backtest_calibration_analysis(row: pd.Series) -> str:
 
 
 def _institution_holding_analysis(row: pd.Series) -> str:
+    org_count = _row_number(row, "互联互通机构数量")
+    org_change = _row_number(row, "互联互通机构数量变化率")
+    if org_count:
+        direction = "增加" if org_change > 0 else "减少或持平"
+        return (
+            f"机构持仓：互联互通披露口径下机构数量约 {org_count:.0f} 家，"
+            f"较上期{direction}，变化率约 {org_change:.1f}%。这是持仓代理指标，不等同于全市场机构持仓。"
+        )
     return "机构持仓：未取得可靠最新机构持仓数据，暂不参与加分。"
 
 
 def _northbound_analysis(row: pd.Series) -> str:
+    holding = _row_number(row, "互联互通持股数")
+    add_shares = _row_number(row, "互联互通增持股数")
+    ratio = _row_number(row, "互联互通流通股占比")
+    date = str(row.get("互联互通持仓日期", "") or "")
+    if holding:
+        direction = "增持" if add_shares > 0 else "减持" if add_shares < 0 else "持平"
+        date_text = date[:10] if date else "最近披露期"
+        return (
+            f"北向/互联互通持仓：截至 {date_text}，持股约 {holding / 10000:.1f} 万股，"
+            f"本期{direction}约 {abs(add_shares) / 10000:.1f} 万股，流通股占比约 {ratio:.2f}%。"
+        )
     return "北向资金：未取得可靠个股北向资金数据，暂不参与加分。"
 
 
 def _margin_financing_analysis(row: pd.Series) -> str:
+    balance = _row_number(row, "融资余额")
+    net_buy = _row_number(row, "融资净买额")
+    five_day = _row_number(row, "5日融资净买额")
+    date = str(row.get("融资融券日期", "") or "")
+    if balance:
+        direction = "净买入" if net_buy > 0 else "净偿还" if net_buy < 0 else "基本持平"
+        date_text = date[:10] if date else "最近交易日"
+        return (
+            f"融资融券：截至 {date_text}，融资余额约 {balance / 100_000_000:.1f} 亿元，"
+            f"当日融资{direction}约 {abs(net_buy) / 100_000_000:.2f} 亿元，"
+            f"5日融资净额约 {five_day / 100_000_000:.2f} 亿元。"
+        )
     return "融资融券：未取得可靠个股融资融券数据，暂不参与加分。"
 
 
 def _main_fund_flow_analysis(row: pd.Series) -> str:
+    main_net = _row_number(row, "主力净流入")
+    main_ratio = _row_number(row, "主力净占比")
+    if main_net:
+        direction = "净流入" if main_net > 0 else "净流出"
+        return f"主力资金：当日主力资金{direction}约 {abs(main_net) / 100_000_000:.2f} 亿元，净占比约 {main_ratio:.2f}%。"
     return "主力资金：未取得可靠实时主力资金流向数据，暂不参与加分。"
 
 
@@ -693,6 +729,12 @@ def _support_evidence(row: pd.Series) -> str:
     pe = _row_number(row, "市盈率-动态")
     if 0 < pe <= 45:
         evidence.append("估值未处于规则定义的极端高估区")
+    if _row_number(row, "主力净流入") > 0:
+        evidence.append("主力资金净流入")
+    if _row_number(row, "融资净买额") > 0:
+        evidence.append("融资资金净买入")
+    if _row_number(row, "互联互通增持股数") > 0:
+        evidence.append("互联互通持仓增持")
     if not evidence:
         evidence.append("综合排序靠前，但强支持证据不足")
     return "支持：" + "；".join(evidence[:4]) + "。"
@@ -716,6 +758,12 @@ def _opposition_evidence(row: pd.Series) -> str:
         evidence.append(f"动态市盈率 {pe:.1f} 偏高")
     if int(row.get("行业样本数", 0) or 0) < 3:
         evidence.append("行业代理样本偏少")
+    if _row_number(row, "主力净流入") < 0:
+        evidence.append("主力资金净流出")
+    if _row_number(row, "融资净买额") < 0:
+        evidence.append("融资资金净偿还")
+    if _row_number(row, "互联互通增持股数") < 0:
+        evidence.append("互联互通持仓减持")
     if not evidence:
         evidence.append("暂未发现规则内的明显反对证据")
     return "反对：" + "；".join(evidence[:4]) + "。"
@@ -726,6 +774,167 @@ def _row_number(row: pd.Series, column: str) -> float:
         return float(row.get(column, 0) or 0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _fetch_market_evidence(codes: list[str]) -> pd.DataFrame:
+    frames = []
+    for fetcher in (
+        _fetch_margin_financing_evidence,
+        _fetch_northbound_holding_evidence,
+        _fetch_main_fund_flow_evidence,
+    ):
+        try:
+            frame = fetcher(codes)
+        except Exception:
+            continue
+        if not frame.empty:
+            frames.append(frame)
+    if not frames:
+        return pd.DataFrame(columns=["代码"])
+    result = frames[0]
+    for frame in frames[1:]:
+        result = result.merge(frame, on="代码", how="outer")
+    return result
+
+
+def _fetch_margin_financing_evidence(codes: list[str]) -> pd.DataFrame:
+    rows = _fetch_datacenter_rows(
+        {
+            "sortColumns": "DATE",
+            "sortTypes": "-1",
+            "pageSize": min(max(len(codes) * 4, 20), 200),
+            "pageNumber": 1,
+            "reportName": "RPTA_WEB_RZRQ_GGMX",
+            "columns": "ALL",
+            "filter": _in_filter("SCODE", codes),
+        }
+    )
+    return _parse_margin_financing_rows(rows)
+
+
+def _parse_margin_financing_rows(rows: list[dict[str, object]]) -> pd.DataFrame:
+    if not rows:
+        return pd.DataFrame(columns=["代码"])
+    frame = pd.DataFrame(rows)
+    frame = frame.sort_values("DATE", ascending=False).drop_duplicates("SCODE")
+    return frame.rename(
+        columns={
+            "SCODE": "代码",
+            "DATE": "融资融券日期",
+            "RZYE": "融资余额",
+            "RQYE": "融券余额",
+            "RZJME": "融资净买额",
+            "RZJME5D": "5日融资净买额",
+            "RZJME10D": "10日融资净买额",
+        }
+    )[["代码", "融资融券日期", "融资余额", "融券余额", "融资净买额", "5日融资净买额", "10日融资净买额"]]
+
+
+def _fetch_northbound_holding_evidence(codes: list[str]) -> pd.DataFrame:
+    rows = _fetch_datacenter_rows(
+        {
+            "sortColumns": "HOLD_DATE,HOLD_MARKET_CAP",
+            "sortTypes": "-1,-1",
+            "pageSize": min(max(len(codes) * 4, 20), 200),
+            "pageNumber": 1,
+            "reportName": "RPT_MUTUAL_HOLDRANK_NEW",
+            "columns": "ALL",
+            "filter": _in_filter("SECURITY_CODE", codes),
+        }
+    )
+    return _parse_northbound_holding_rows(rows)
+
+
+def _parse_northbound_holding_rows(rows: list[dict[str, object]]) -> pd.DataFrame:
+    if not rows:
+        return pd.DataFrame(columns=["代码"])
+    frame = pd.DataFrame(rows)
+    frame = frame.sort_values("HOLD_DATE", ascending=False).drop_duplicates("SECURITY_CODE")
+    return frame.rename(
+        columns={
+            "SECURITY_CODE": "代码",
+            "HOLD_DATE": "互联互通持仓日期",
+            "HOLD_SHARES": "互联互通持股数",
+            "ADD_SHARES_REPAIR": "互联互通增持股数",
+            "HOLD_MARKET_CAP": "互联互通持仓市值",
+            "FREE_SHARES_RATIO": "互联互通流通股占比",
+            "ORG_QUANTITY": "互联互通机构数量",
+            "ORG_QUANTITY_RATIO": "互联互通机构数量变化率",
+        }
+    )[
+        [
+            "代码",
+            "互联互通持仓日期",
+            "互联互通持股数",
+            "互联互通增持股数",
+            "互联互通持仓市值",
+            "互联互通流通股占比",
+            "互联互通机构数量",
+            "互联互通机构数量变化率",
+        ]
+    ]
+
+
+def _fetch_main_fund_flow_evidence(codes: list[str]) -> pd.DataFrame:
+    if not codes:
+        return pd.DataFrame(columns=["代码"])
+    secids = ",".join(_eastmoney_secid(code) for code in codes)
+    session = requests.Session()
+    session.trust_env = False
+    response = session.get(
+        "https://push2.eastmoney.com/api/qt/ulist.np/get",
+        params={
+            "fltt": "2",
+            "secids": secids,
+            "fields": "f12,f62,f184,f66,f72,f78,f84",
+            "ut": "b2884a393a59ad64002292a3e90d46a5",
+        },
+        timeout=15,
+        headers={"User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/zjlx/"},
+    )
+    response.raise_for_status()
+    rows = ((response.json().get("data") or {}).get("diff") or [])
+    return _parse_main_fund_flow_rows(rows)
+
+
+def _parse_main_fund_flow_rows(rows: list[dict[str, object]]) -> pd.DataFrame:
+    if not rows:
+        return pd.DataFrame(columns=["代码"])
+    return pd.DataFrame(rows).rename(
+        columns={
+            "f12": "代码",
+            "f62": "主力净流入",
+            "f184": "主力净占比",
+            "f66": "超大单净流入",
+            "f72": "大单净流入",
+            "f78": "中单净流入",
+            "f84": "小单净流入",
+        }
+    )[["代码", "主力净流入", "主力净占比", "超大单净流入", "大单净流入", "中单净流入", "小单净流入"]]
+
+
+def _fetch_datacenter_rows(params: dict[str, object]) -> list[dict[str, object]]:
+    session = requests.Session()
+    session.trust_env = False
+    response = session.get(
+        "https://datacenter-web.eastmoney.com/api/data/v1/get",
+        params=params,
+        timeout=20,
+        headers={"User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/"},
+    )
+    response.raise_for_status()
+    return ((response.json().get("result") or {}).get("data") or [])
+
+
+def _in_filter(field: str, codes: list[str]) -> str:
+    quoted = ",".join(f'"{str(code).zfill(6)}"' for code in codes)
+    return f"({field} in ({quoted}))"
+
+
+def _eastmoney_secid(code: str) -> str:
+    normalized = str(code).zfill(6)
+    market = "1" if normalized.startswith("6") else "0"
+    return f"{market}.{normalized}"
 
 
 def _enrich_financial_evidence(spot: pd.DataFrame) -> pd.DataFrame:
@@ -859,6 +1068,14 @@ def _enrich_selected_risks(candidates: dict[str, pd.DataFrame]) -> dict[str, pd.
             enriched[period] = frame
             continue
         result = frame.copy()
+        codes = sorted({str(code).zfill(6) for code in result["代码"].dropna().astype(str)})
+        market_evidence = _fetch_market_evidence(codes)
+        if not market_evidence.empty:
+            result = result.merge(market_evidence, on="代码", how="left")
+            result["机构持仓分析"] = result.apply(_institution_holding_analysis, axis=1)
+            result["北向资金分析"] = result.apply(_northbound_analysis, axis=1)
+            result["融资融券分析"] = result.apply(_margin_financing_analysis, axis=1)
+            result["主力资金流向"] = result.apply(_main_fund_flow_analysis, axis=1)
         risk = result["代码"].astype(str).apply(_announcement_risk_analysis)
         result["公告新闻风险"] = risk.apply(lambda item: item[0])
         result["风险等级"] = risk.apply(lambda item: item[1])

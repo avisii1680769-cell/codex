@@ -36,9 +36,10 @@ def test_render_home_page_is_chinese_live_scanner_without_upload_form():
     assert "基本面评分" in html
     assert "技术面：" in html
     assert "基本面：" in html
-    assert "完整财报分析" in html
+    assert "融资融券" in html
     assert "规则评分，不是预测概率" in html
-    assert "未纳入因素" in html
+    assert "已接入口径与仍未打通因素" in html
+    assert "未找到足够稳定的结构化接口" in html
     assert "数据来源与覆盖范围" in html
     assert "看涨概率" not in html
     assert "推荐股票" not in html

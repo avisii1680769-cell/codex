@@ -155,6 +155,7 @@ def test_enrich_selected_risks_adds_announcement_risk(monkeypatch):
         )
     }
 
+    monkeypatch.setattr(live, "_fetch_market_evidence", lambda codes: pd.DataFrame(columns=["代码"]))
     monkeypatch.setattr(live, "_fetch_recent_announcement_titles", lambda code: ["公司收到监管问询函"])
 
     enriched = live._enrich_selected_risks(candidates)
@@ -232,3 +233,86 @@ def test_fetch_live_spot_uses_tencent_source_before_cache(monkeypatch):
 
     assert result.equals(sample)
     assert attempts == list(live.EASTMONEY_HOSTS)
+
+
+def test_parse_margin_financing_rows_keeps_latest_row_per_stock():
+    rows = [
+        {
+            "DATE": "2026-05-28 00:00:00",
+            "SCODE": "000001",
+            "RZYE": 100,
+            "RQYE": 20,
+            "RZJME": 5,
+            "RZJME5D": 8,
+            "RZJME10D": 13,
+        },
+        {
+            "DATE": "2026-05-29 00:00:00",
+            "SCODE": "000001",
+            "RZYE": 200,
+            "RQYE": 30,
+            "RZJME": -6,
+            "RZJME5D": -9,
+            "RZJME10D": 15,
+        },
+    ]
+
+    parsed = live._parse_margin_financing_rows(rows)
+
+    assert parsed.iloc[0]["代码"] == "000001"
+    assert parsed.iloc[0]["融资余额"] == 200
+    assert parsed.iloc[0]["融资净买额"] == -6
+    assert parsed.iloc[0]["5日融资净买额"] == -9
+
+
+def test_parse_northbound_holding_rows_keeps_latest_quarterly_holding():
+    rows = [
+        {
+            "HOLD_DATE": "2025-12-31 00:00:00",
+            "SECURITY_CODE": "000001",
+            "HOLD_SHARES": 100,
+            "ADD_SHARES_REPAIR": 5,
+            "HOLD_MARKET_CAP": 1000,
+            "FREE_SHARES_RATIO": 1.2,
+            "ORG_QUANTITY": 20,
+            "ORG_QUANTITY_RATIO": 2.0,
+        },
+        {
+            "HOLD_DATE": "2026-03-31 00:00:00",
+            "SECURITY_CODE": "000001",
+            "HOLD_SHARES": 120,
+            "ADD_SHARES_REPAIR": -3,
+            "HOLD_MARKET_CAP": 1300,
+            "FREE_SHARES_RATIO": 1.5,
+            "ORG_QUANTITY": 22,
+            "ORG_QUANTITY_RATIO": 10.0,
+        },
+    ]
+
+    parsed = live._parse_northbound_holding_rows(rows)
+
+    assert parsed.iloc[0]["代码"] == "000001"
+    assert parsed.iloc[0]["互联互通持股数"] == 120
+    assert parsed.iloc[0]["互联互通增持股数"] == -3
+    assert parsed.iloc[0]["互联互通机构数量"] == 22
+
+
+def test_parse_main_fund_flow_rows_maps_push2_fields():
+    rows = [
+        {
+            "f12": "000001",
+            "f62": 112414454.0,
+            "f184": 10.79,
+            "f66": 59083668.0,
+            "f72": 53330786.0,
+            "f78": -36658864.0,
+            "f84": -75755584.0,
+        }
+    ]
+
+    parsed = live._parse_main_fund_flow_rows(rows)
+
+    assert parsed.iloc[0]["代码"] == "000001"
+    assert parsed.iloc[0]["主力净流入"] == 112414454.0
+    assert parsed.iloc[0]["主力净占比"] == 10.79
+    assert parsed.iloc[0]["大单净流入"] == 53330786.0
