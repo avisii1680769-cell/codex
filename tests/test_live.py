@@ -57,6 +57,20 @@ def test_rank_live_candidates_returns_stable_columns_for_empty_input():
         "现金流分析",
         "行业景气分析",
         "公告新闻风险",
+        "应收账款风险",
+        "存货风险",
+        "商誉风险",
+        "非经常性损益分析",
+        "ROE趋势分析",
+        "多年增长分析",
+        "行业估值分位",
+        "政策周期分析",
+        "全网新闻舆情",
+        "历史回测胜率校准",
+        "机构持仓分析",
+        "北向资金分析",
+        "融资融券分析",
+        "主力资金流向",
         "风险等级",
         "支持证据",
         "反对证据",
@@ -83,6 +97,13 @@ def test_rank_live_candidates_uses_technical_and_fundamental_scores():
             "净利润同比": [12.0, -40.0],
             "资产负债率": [45.0, 92.0],
             "经营现金流": [4_000_000_000, -2_000_000_000],
+            "应收账款": [1_000_000_000, 900_000_000],
+            "存货": [500_000_000, 1_200_000_000],
+            "商誉": [200_000_000, 900_000_000],
+            "扣非净利润": [4_800_000_000, -500_000_000],
+            "ROE": [12.0, -3.0],
+            "多年营收连续增长": [True, False],
+            "多年利润连续增长": [True, False],
             "行业": ["银行", "高风险行业"],
             "公告新闻风险": ["公告/新闻风险：近期公告标题未见明显风险词。", "公告/新闻风险：近期公告含风险词。"],
             "风险等级": ["低", "高"],
@@ -102,6 +123,20 @@ def test_rank_live_candidates_uses_technical_and_fundamental_scores():
     assert "现金流：" in first_mid["现金流分析"]
     assert "行业景气：" in first_mid["行业景气分析"]
     assert "同业样本" in first_mid["行业景气分析"]
+    assert "应收账款：" in first_mid["应收账款风险"]
+    assert "存货：" in first_mid["存货风险"]
+    assert "商誉：" in first_mid["商誉风险"]
+    assert "扣非净利润" in first_mid["非经常性损益分析"]
+    assert "ROE" in first_mid["ROE趋势分析"]
+    assert "多年增长：" in first_mid["多年增长分析"]
+    assert "行业估值分位：" in first_mid["行业估值分位"]
+    assert "政策周期：" in first_mid["政策周期分析"]
+    assert "全网新闻舆情：" in first_mid["全网新闻舆情"]
+    assert "历史回测：" in first_mid["历史回测胜率校准"]
+    assert "机构持仓：" in first_mid["机构持仓分析"]
+    assert "北向资金：" in first_mid["北向资金分析"]
+    assert "融资融券：" in first_mid["融资融券分析"]
+    assert "主力资金：" in first_mid["主力资金流向"]
     assert "支持证据" in first_mid
     assert "反对证据" in first_mid
     assert first_mid["支持证据"]

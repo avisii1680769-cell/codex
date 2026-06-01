@@ -31,6 +31,20 @@ LIVE_COLUMNS = [
     "现金流分析",
     "行业景气分析",
     "公告新闻风险",
+    "应收账款风险",
+    "存货风险",
+    "商誉风险",
+    "非经常性损益分析",
+    "ROE趋势分析",
+    "多年增长分析",
+    "行业估值分位",
+    "政策周期分析",
+    "全网新闻舆情",
+    "历史回测胜率校准",
+    "机构持仓分析",
+    "北向资金分析",
+    "融资融券分析",
+    "主力资金流向",
     "风险等级",
     "支持证据",
     "反对证据",
@@ -318,6 +332,11 @@ def _normalize_spot(spot: pd.DataFrame) -> pd.DataFrame:
         "净利润同比",
         "资产负债率",
         "经营现金流",
+        "应收账款",
+        "存货",
+        "商誉",
+        "扣非净利润",
+        "ROE",
         "利润评分",
         "负债评分",
         "现金流评分",
@@ -334,6 +353,10 @@ def _normalize_spot(spot: pd.DataFrame) -> pd.DataFrame:
         if column not in df.columns:
             df[column] = ""
         df[column] = df[column].astype(str)
+    for column in ["多年营收连续增长", "多年利润连续增长"]:
+        if column not in df.columns:
+            df[column] = False
+        df[column] = df[column].fillna(False).astype(bool)
     return df
 
 
@@ -409,6 +432,20 @@ def _rank_period(
     result["负债分析"] = result.apply(_debt_analysis, axis=1)
     result["现金流分析"] = result.apply(_cashflow_analysis, axis=1)
     result["行业景气分析"] = result.apply(_industry_analysis, axis=1)
+    result["应收账款风险"] = result.apply(_receivable_risk_analysis, axis=1)
+    result["存货风险"] = result.apply(_inventory_risk_analysis, axis=1)
+    result["商誉风险"] = result.apply(_goodwill_risk_analysis, axis=1)
+    result["非经常性损益分析"] = result.apply(_nonrecurring_analysis, axis=1)
+    result["ROE趋势分析"] = result.apply(_roe_trend_analysis, axis=1)
+    result["多年增长分析"] = result.apply(_multi_year_growth_analysis, axis=1)
+    result["行业估值分位"] = result.apply(_industry_valuation_percentile_analysis, axis=1)
+    result["政策周期分析"] = result.apply(_policy_cycle_analysis, axis=1)
+    result["全网新闻舆情"] = result.apply(_web_news_sentiment_analysis, axis=1)
+    result["历史回测胜率校准"] = result.apply(_backtest_calibration_analysis, axis=1)
+    result["机构持仓分析"] = result.apply(_institution_holding_analysis, axis=1)
+    result["北向资金分析"] = result.apply(_northbound_analysis, axis=1)
+    result["融资融券分析"] = result.apply(_margin_financing_analysis, axis=1)
+    result["主力资金流向"] = result.apply(_main_fund_flow_analysis, axis=1)
     if "公告新闻风险" not in result.columns:
         result["公告新闻风险"] = "公告/新闻风险：等待近期公告抓取。"
     if "风险等级" not in result.columns:
@@ -542,9 +579,105 @@ def _add_industry_proxy(df: pd.DataFrame) -> pd.DataFrame:
         行业平均涨跌幅=("涨跌幅", "mean"),
         行业平均换手率=("换手率", "mean"),
     )
-    return result.merge(grouped, on="行业", how="left").fillna(
+    result = result.merge(grouped, on="行业", how="left").fillna(
         {"行业样本数": 0, "行业平均涨跌幅": 0.0, "行业平均换手率": 0.0}
     )
+    pe = result["市盈率-动态"].where(result["市盈率-动态"] > 0)
+    result["行业PE分位"] = pe.groupby(result["行业"]).rank(pct=True).fillna(0.0) * 100
+    return result
+
+
+def _receivable_risk_analysis(row: pd.Series) -> str:
+    receivable = _row_number(row, "应收账款")
+    revenue = _row_number(row, "营收")
+    if receivable == 0:
+        return "应收账款：未取得可靠应收账款数据。"
+    ratio = receivable / revenue * 100 if revenue else 0
+    level = "偏高，需核查回款质量" if ratio > 30 else "处于规则可接受区间"
+    return f"应收账款：约 {receivable / 100_000_000:.1f} 亿元，占营收约 {ratio:.1f}%，{level}。"
+
+
+def _inventory_risk_analysis(row: pd.Series) -> str:
+    inventory = _row_number(row, "存货")
+    revenue = _row_number(row, "营收")
+    if inventory == 0:
+        return "存货：未取得可靠存货数据。"
+    ratio = inventory / revenue * 100 if revenue else 0
+    level = "偏高，需核查跌价和周转风险" if ratio > 40 else "处于规则可接受区间"
+    return f"存货：约 {inventory / 100_000_000:.1f} 亿元，占营收约 {ratio:.1f}%，{level}。"
+
+
+def _goodwill_risk_analysis(row: pd.Series) -> str:
+    goodwill = _row_number(row, "商誉")
+    market_cap = _row_number(row, "总市值")
+    if goodwill == 0:
+        return "商誉：未取得可靠商誉数据或商誉较低。"
+    ratio = goodwill / market_cap * 100 if market_cap else 0
+    level = "偏高，需核查减值风险" if ratio > 10 else "占市值比例不高"
+    return f"商誉：约 {goodwill / 100_000_000:.1f} 亿元，占市值约 {ratio:.1f}%，{level}。"
+
+
+def _nonrecurring_analysis(row: pd.Series) -> str:
+    profit = _row_number(row, "净利润")
+    deduct_profit = _row_number(row, "扣非净利润")
+    if deduct_profit == 0:
+        return "非经常性损益：未取得可靠扣非净利润数据。"
+    gap = profit - deduct_profit
+    ratio = gap / abs(profit) * 100 if profit else 0
+    level = "非经常性损益占比较高" if ratio > 30 else "扣非后利润差异不大"
+    return f"非经常性损益：扣非净利润约 {deduct_profit / 100_000_000:.1f} 亿元，{level}。"
+
+
+def _roe_trend_analysis(row: pd.Series) -> str:
+    roe = _row_number(row, "ROE")
+    if roe == 0:
+        return "ROE趋势：未取得可靠 ROE 多期数据。"
+    return f"ROE趋势：最新 ROE 约 {roe:.1f}%；多期趋势仍需结合后续报告持续校准。"
+
+
+def _multi_year_growth_analysis(row: pd.Series) -> str:
+    revenue_growth = bool(row.get("多年营收连续增长", False))
+    profit_growth = bool(row.get("多年利润连续增长", False))
+    return (
+        "多年增长："
+        f"营收连续增长={'是' if revenue_growth else '否或数据不足'}；"
+        f"利润连续增长={'是' if profit_growth else '否或数据不足'}。"
+    )
+
+
+def _industry_valuation_percentile_analysis(row: pd.Series) -> str:
+    percentile = _row_number(row, "行业PE分位")
+    if percentile == 0:
+        return "行业估值分位：同业估值样本不足，暂不判断。"
+    return f"行业估值分位：当前动态市盈率约处于同业样本第 {percentile:.0f} 分位。"
+
+
+def _policy_cycle_analysis(row: pd.Series) -> str:
+    return "政策周期：未取得可靠政策周期结构化数据，暂不参与加分。"
+
+
+def _web_news_sentiment_analysis(row: pd.Series) -> str:
+    return "全网新闻舆情：未接入稳定全网新闻源，当前仅使用公告标题风险作为替代证据。"
+
+
+def _backtest_calibration_analysis(row: pd.Series) -> str:
+    return "历史回测：当前实时候选尚未与历史 5/20/60 日胜率校准打通。"
+
+
+def _institution_holding_analysis(row: pd.Series) -> str:
+    return "机构持仓：未取得可靠最新机构持仓数据，暂不参与加分。"
+
+
+def _northbound_analysis(row: pd.Series) -> str:
+    return "北向资金：未取得可靠个股北向资金数据，暂不参与加分。"
+
+
+def _margin_financing_analysis(row: pd.Series) -> str:
+    return "融资融券：未取得可靠个股融资融券数据，暂不参与加分。"
+
+
+def _main_fund_flow_analysis(row: pd.Series) -> str:
+    return "主力资金：未取得可靠实时主力资金流向数据，暂不参与加分。"
 
 
 def _support_evidence(row: pd.Series) -> str:
@@ -645,9 +778,10 @@ def _fetch_financial_report(report_name: str, codes: list[str]) -> pd.DataFrame:
                 "PARENT_NETPROFIT": "净利润",
                 "TOTAL_OPERATE_INCOME": "营收",
                 "PARENT_NETPROFIT_RATIO": "净利润同比",
+                "DEDUCT_PARENT_NETPROFIT": "扣非净利润",
                 "INDUSTRY_NAME": "行业",
             }
-        )[["代码", "净利润", "营收", "净利润同比", "行业"]]
+        )[["代码", "净利润", "营收", "净利润同比", "扣非净利润", "行业"]]
     if report_name == "RPT_DMSK_FN_BALANCE":
         result = frame.rename(
             columns={
@@ -655,15 +789,22 @@ def _fetch_financial_report(report_name: str, codes: list[str]) -> pd.DataFrame:
                 "TOTAL_ASSETS": "总资产",
                 "TOTAL_LIABILITIES": "总负债",
                 "DEBT_ASSET_RATIO": "资产负债率",
+                "ACCOUNTS_RECE": "应收账款",
+                "INVENTORY": "存货",
+                "GOODWILL": "商誉",
             }
-        )[["代码", "总资产", "总负债", "资产负债率"]]
+        )
+        for column in ["应收账款", "存货", "商誉"]:
+            if column not in result.columns:
+                result[column] = 0.0
+        result = result[["代码", "总资产", "总负债", "资产负债率", "应收账款", "存货", "商誉"]]
         missing = pd.to_numeric(result["资产负债率"], errors="coerce").isna()
         result.loc[missing, "资产负债率"] = (
             pd.to_numeric(result.loc[missing, "总负债"], errors="coerce")
             / pd.to_numeric(result.loc[missing, "总资产"], errors="coerce")
             * 100
         )
-        return result[["代码", "资产负债率"]]
+        return result[["代码", "资产负债率", "应收账款", "存货", "商誉"]]
     if report_name == "RPT_DMSK_FN_CASHFLOW":
         return frame.rename(
             columns={
@@ -676,10 +817,24 @@ def _fetch_financial_report(report_name: str, codes: list[str]) -> pd.DataFrame:
 
 def _score_financial_evidence(frame: pd.DataFrame) -> pd.DataFrame:
     result = frame.copy()
-    for column in ["净利润", "营收", "净利润同比", "资产负债率", "经营现金流"]:
+    for column in [
+        "净利润",
+        "营收",
+        "净利润同比",
+        "资产负债率",
+        "经营现金流",
+        "应收账款",
+        "存货",
+        "商誉",
+        "扣非净利润",
+        "ROE",
+    ]:
         if column not in result.columns:
             result[column] = 0.0
         result[column] = pd.to_numeric(result[column], errors="coerce").fillna(0.0)
+    for column in ["多年营收连续增长", "多年利润连续增长"]:
+        if column not in result.columns:
+            result[column] = False
     if "行业" not in result.columns:
         result["行业"] = ""
     result["行业"] = result["行业"].fillna("").astype(str)
