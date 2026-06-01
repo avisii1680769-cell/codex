@@ -14,6 +14,8 @@ SUMMARY_COLUMNS = [
     "median_return",
     "worst_return",
     "best_return",
+    "profit_loss_ratio",
+    "max_drawdown",
     "unstable_sample",
 ]
 
@@ -26,6 +28,7 @@ def test_summarize_backtest_groups_by_strategy_and_window():
             "fixed_target_success": [True, False, True, True, False],
             "path_success": [True, None, float("nan"), None, float("nan")],
             "window_return": [0.05, -0.02, 0.12, 0.03, -0.01],
+            "max_drawdown": [-0.01, -0.05, -0.03, -0.02, -0.04],
         }
     )
 
@@ -39,6 +42,8 @@ def test_summarize_backtest_groups_by_strategy_and_window():
     assert row["median_return"] == pytest.approx(0.05)
     assert row["worst_return"] == pytest.approx(-0.02)
     assert row["best_return"] == pytest.approx(0.12)
+    assert row["profit_loss_ratio"] == pytest.approx(((0.05 + 0.12) / 2) / 0.02)
+    assert row["max_drawdown"] == pytest.approx(-0.05)
 
     long_window_row = summary[
         (summary["strategy"] == "control") & (summary["window"] == 20)
@@ -48,7 +53,14 @@ def test_summarize_backtest_groups_by_strategy_and_window():
 
 def test_summarize_backtest_returns_empty_frame_with_columns():
     results = pd.DataFrame(
-        columns=["strategy", "window", "fixed_target_success", "path_success", "window_return"]
+        columns=[
+            "strategy",
+            "window",
+            "fixed_target_success",
+            "path_success",
+            "window_return",
+            "max_drawdown",
+        ]
     )
 
     summary = summarize_backtest(results)
@@ -65,6 +77,7 @@ def test_summarize_backtest_marks_unstable_sample_threshold():
             "fixed_target_success": [True] * 59,
             "path_success": [True] * 59,
             "window_return": [0.01] * 59,
+            "max_drawdown": [-0.01] * 59,
         }
     )
 
@@ -88,6 +101,7 @@ def test_summarize_backtest_preserves_raw_mean_precision():
             "fixed_target_success": [True],
             "path_success": [True],
             "window_return": [0.123456789123456],
+            "max_drawdown": [-0.01],
         }
     )
 
@@ -108,6 +122,7 @@ def test_summarize_group_stability_groups_by_year_industry_and_market_cap_bucket
             "fixed_target_success": [True, False, True],
             "path_success": [True, False, None],
             "window_return": [0.05, -0.02, 0.12],
+            "max_drawdown": [-0.01, -0.05, -0.03],
         }
     )
 

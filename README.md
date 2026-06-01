@@ -71,6 +71,8 @@ Research output is grouped by `strategy` and holding `window`.
 - `fixed_target_success_rate`: share of samples whose maximum future high within the window reached the configured fixed return target.
 - `path_success_rate`: share of samples whose path hit the configured take-profit threshold before the stop-loss threshold. Samples that hit neither threshold end at the window close and are not counted as path successes.
 - `average_return`, `median_return`, `worst_return`, `best_return`: return statistics measured from signal close to the window-end close.
+- `profit_loss_ratio`: average winning return divided by the absolute average losing return.
+- `max_drawdown`: worst intrawindow low return after round-trip transaction costs.
 - `unstable_sample`: `true` when `sample_count` is below 30, meaning the sample size is too small for stable interpretation.
 
 The detail files are:

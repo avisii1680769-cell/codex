@@ -9,6 +9,7 @@ RESULT_COLUMNS = [
     "path_success",
     "window_return",
     "max_return",
+    "max_drawdown",
     "exit_reason",
 ]
 
@@ -57,6 +58,7 @@ def run_backtest(
                 continue
 
             max_return = future["high"].max() / entry_close - 1 - round_trip_cost
+            max_drawdown = future["low"].min() / entry_close - 1 - round_trip_cost
             window_return = future["close"].iloc[-1] / entry_close - 1 - round_trip_cost
             fixed_target = config.fixed_return_targets[window]
             path_success, exit_reason = _evaluate_path(
@@ -75,6 +77,7 @@ def run_backtest(
                     "path_success": path_success,
                     "window_return": window_return,
                     "max_return": max_return,
+                    "max_drawdown": max_drawdown,
                     "exit_reason": exit_reason,
                 }
             )

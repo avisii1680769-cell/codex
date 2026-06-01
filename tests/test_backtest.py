@@ -101,10 +101,11 @@ def test_run_backtest_returns_empty_frame_with_columns_when_no_future_prices():
         "window",
         "fixed_target_success",
         "path_success",
-        "window_return",
-        "max_return",
-        "exit_reason",
-    ]
+            "window_return",
+            "max_return",
+            "max_drawdown",
+            "exit_reason",
+        ]
 
 
 def test_run_backtest_skips_window_when_future_prices_are_shorter_than_window():
@@ -142,10 +143,11 @@ def test_run_backtest_skips_window_when_future_prices_are_shorter_than_window():
         "window",
         "fixed_target_success",
         "path_success",
-        "window_return",
-        "max_return",
-        "exit_reason",
-    ]
+            "window_return",
+            "max_return",
+            "max_drawdown",
+            "exit_reason",
+        ]
 
 
 def test_run_backtest_applies_round_trip_costs_to_returns_and_fixed_target():
@@ -217,3 +219,37 @@ def test_run_backtest_applies_round_trip_costs_to_path_success():
 
     assert results["path_success"].iloc[0] is None
     assert results["exit_reason"].iloc[0] == "window_end"
+
+
+def test_run_backtest_records_max_drawdown_after_costs():
+    prices = pd.DataFrame(
+        {
+            "trade_date": pd.date_range("2026-01-01", periods=4, freq="D"),
+            "symbol": ["A"] * 4,
+            "open": [10.0, 10.0, 10.0, 10.0],
+            "high": [10.0, 10.2, 10.1, 10.3],
+            "low": [10.0, 9.7, 9.6, 9.8],
+            "close": [10.0, 10.1, 9.9, 10.2],
+        }
+    )
+    signals = pd.DataFrame(
+        {
+            "signal_date": pd.to_datetime(["2026-01-01"]),
+            "symbol": ["A"],
+            "entry_close": [10.0],
+            "strategy": ["demo"],
+        }
+    )
+
+    results = run_backtest(
+        prices,
+        signals,
+        BacktestConfig(
+            windows=(3,),
+            fixed_return_targets={3: 0.03},
+            stop_loss=0.05,
+            costs=CostConfig(commission_rate=0.0003, slippage_rate=0.0005),
+        ),
+    )
+
+    assert results["max_drawdown"].iloc[0] == pytest.approx(-0.04 - 0.0016)

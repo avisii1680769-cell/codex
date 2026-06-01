@@ -11,6 +11,8 @@ SUMMARY_COLUMNS = [
     "median_return",
     "worst_return",
     "best_return",
+    "profit_loss_ratio",
+    "max_drawdown",
     "unstable_sample",
 ]
 STABILITY_COLUMNS = ["group_type", "group_value", *SUMMARY_COLUMNS]
@@ -29,7 +31,9 @@ def summarize_backtest(results: pd.DataFrame) -> pd.DataFrame:
         median_return=("window_return", "median"),
         worst_return=("window_return", "min"),
         best_return=("window_return", "max"),
+        max_drawdown=("max_drawdown", "min"),
     ).reset_index()
+    summary["profit_loss_ratio"] = grouped["window_return"].apply(_profit_loss_ratio).to_numpy()
     summary["unstable_sample"] = summary["sample_count"] < 30
     return summary[SUMMARY_COLUMNS]
 
@@ -74,7 +78,9 @@ def _summarize_with_group(results: pd.DataFrame) -> pd.DataFrame:
         median_return=("window_return", "median"),
         worst_return=("window_return", "min"),
         best_return=("window_return", "max"),
+        max_drawdown=("max_drawdown", "min"),
     ).reset_index()
+    summary["profit_loss_ratio"] = grouped["window_return"].apply(_profit_loss_ratio).to_numpy()
     summary["unstable_sample"] = summary["sample_count"] < 30
     return summary
 
@@ -86,3 +92,11 @@ def _market_cap_bucket(market_cap: pd.Series) -> pd.Series:
         labels=["small", "mid", "large"],
         right=False,
     ).astype(str)
+
+
+def _profit_loss_ratio(returns: pd.Series) -> float:
+    winners = returns[returns > 0]
+    losers = returns[returns < 0]
+    if winners.empty or losers.empty:
+        return float("nan")
+    return winners.mean() / abs(losers.mean())
