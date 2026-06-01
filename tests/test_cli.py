@@ -56,6 +56,46 @@ def test_cli_research_writes_reports(tmp_path):
     assert "summary.md" in result.output
 
 
+def test_cli_research_accepts_single_strategy_preset(tmp_path):
+    runner = CliRunner()
+    output_dir = tmp_path / "research"
+
+    result = runner.invoke(
+        app,
+        [
+            "research",
+            "examples/sample_prices.csv",
+            "--output-dir",
+            str(output_dir),
+            "--strategy-name",
+            "trend_volume",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert (output_dir / "summary.csv").exists()
+
+
+def test_cli_research_rejects_unknown_strategy_preset(tmp_path):
+    runner = CliRunner()
+    output_dir = tmp_path / "research"
+
+    result = runner.invoke(
+        app,
+        [
+            "research",
+            "examples/sample_prices.csv",
+            "--output-dir",
+            str(output_dir),
+            "--strategy-name",
+            "missing",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "Unknown strategy preset: missing" in result.output
+
+
 def test_cli_research_writes_empty_summary_for_header_only_csv(tmp_path):
     runner = CliRunner()
     input_path = tmp_path / "empty_prices.csv"

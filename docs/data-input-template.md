@@ -34,3 +34,5 @@ stock-bullish research path\to\market_data.csv --output-dir outputs/research
 ```
 
 The tool expects one row per `symbol` and `trade_date`. Sort order is not required; the loader sorts by `symbol` and `trade_date`.
+
+The default command evaluates all built-in strategy presets. Use `--strategy-name trend_volume`, `--strategy-name breakout_momentum`, `--strategy-name capital_inflow`, or `--strategy-name balanced` to run one preset.

@@ -18,6 +18,12 @@ Run the end-to-end research command against the bundled sample data:
 stock-bullish research examples/sample_prices.csv --output-dir outputs/research
 ```
 
+By default, `research` evaluates all built-in strategy presets. To run one preset:
+
+```powershell
+stock-bullish research examples/sample_prices.csv --output-dir outputs/research --strategy-name trend_volume
+```
+
 The command writes:
 
 - `outputs/research/summary.csv`
@@ -26,6 +32,15 @@ The command writes:
 Empty reports are valid when the input data does not produce matching strategy signals. The CSV still keeps the standard summary header.
 
 Use `examples/market_data_template.csv` as a template for real daily market data. See `docs/data-input-template.md` for field definitions and examples.
+
+## Strategy Presets
+
+- `trend_volume`: moving averages are aligned upward and volume is expanding.
+- `breakout_momentum`: moving-average breakout, volume expansion, and recent momentum.
+- `capital_inflow`: amount expansion, turnover spike, and consecutive amount inflow.
+- `balanced`: a broader score across trend, breakout, volume, amount, and volatility contraction.
+
+Use `--strategy-name all` to compare every preset in one report. This is the default.
 
 ## Input Data
 

@@ -10,6 +10,41 @@ class StrategyRule:
     min_score: int | None = None
 
 
+PRESET_STRATEGIES = {
+    "trend_volume": StrategyRule("trend_volume", ("ma_bullish", "volume_expansion"), min_score=2),
+    "breakout_momentum": StrategyRule(
+        "breakout_momentum",
+        ("ma_breakout", "volume_expansion", "momentum_strong"),
+        min_score=2,
+    ),
+    "capital_inflow": StrategyRule(
+        "capital_inflow",
+        ("amount_expansion", "turnover_spike", "consecutive_amount_inflow"),
+        min_score=2,
+    ),
+    "balanced": StrategyRule(
+        "balanced",
+        (
+            "ma_bullish",
+            "ma_breakout",
+            "volume_expansion",
+            "amount_expansion",
+            "volatility_contraction",
+        ),
+        min_score=3,
+    ),
+}
+
+
+def get_strategy_rules(strategy_name: str = "all") -> tuple[StrategyRule, ...]:
+    if strategy_name == "all":
+        return tuple(PRESET_STRATEGIES.values())
+    if strategy_name not in PRESET_STRATEGIES:
+        valid_names = ", ".join(["all", *PRESET_STRATEGIES])
+        raise ValueError(f"Unknown strategy preset: {strategy_name}. Valid presets: {valid_names}")
+    return (PRESET_STRATEGIES[strategy_name],)
+
+
 def generate_signals(df: pd.DataFrame, rule: StrategyRule) -> pd.DataFrame:
     missing = [condition for condition in rule.conditions if condition not in df.columns]
     if missing:

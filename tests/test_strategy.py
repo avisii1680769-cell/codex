@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from stock_bullish.strategy import StrategyRule, generate_signals
+from stock_bullish.strategy import PRESET_STRATEGIES, StrategyRule, generate_signals, get_strategy_rules
 
 
 def test_generate_signals_requires_all_selected_conditions():
@@ -97,3 +97,21 @@ def test_generate_signals_rejects_missing_condition_columns():
             df,
             StrategyRule(name="breakout", conditions=("ma_bullish", "volume_expansion")),
         )
+
+
+def test_get_strategy_rules_returns_all_presets_by_default():
+    rules = get_strategy_rules("all")
+
+    assert [rule.name for rule in rules] == list(PRESET_STRATEGIES)
+    assert len(rules) >= 3
+
+
+def test_get_strategy_rules_returns_single_named_preset():
+    rules = get_strategy_rules("trend_volume")
+
+    assert rules == (PRESET_STRATEGIES["trend_volume"],)
+
+
+def test_get_strategy_rules_rejects_unknown_name():
+    with pytest.raises(ValueError, match="Unknown strategy preset: missing"):
+        get_strategy_rules("missing")
