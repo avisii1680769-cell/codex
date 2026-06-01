@@ -46,9 +46,40 @@ def test_rank_live_candidates_returns_stable_columns_for_empty_input():
         "量比",
         "振幅",
         "看涨评分",
+        "技术面评分",
+        "基本面评分",
         "评分",
+        "技术面分析",
+        "基本面分析",
         "入选理由",
     ]
+
+
+def test_rank_live_candidates_uses_technical_and_fundamental_scores():
+    spot = pd.DataFrame(
+        {
+            "代码": ["000001", "000002"],
+            "名称": ["技术基本面共振", "只有技术强"],
+            "最新价": [10.0, 20.0],
+            "涨跌幅": [3.2, 5.8],
+            "成交额": [1_500_000_000, 1_800_000_000],
+            "换手率": [4.5, 7.0],
+            "量比": [1.8, 2.3],
+            "振幅": [4.0, 7.0],
+            "市盈率-动态": [18.0, 120.0],
+            "市净率": [1.4, 12.0],
+            "总市值": [120_000_000_000, 5_000_000_000],
+        }
+    )
+
+    candidates = rank_live_candidates(spot, limit=2)
+    first_mid = candidates["中期"].iloc[0]
+
+    assert first_mid["代码"] == "000001"
+    assert first_mid["技术面评分"] > 0
+    assert first_mid["基本面评分"] > 0
+    assert "技术面：" in first_mid["技术面分析"]
+    assert "基本面：" in first_mid["基本面分析"]
 
 
 def test_fetch_live_spot_tries_next_eastmoney_host_before_cache(monkeypatch):

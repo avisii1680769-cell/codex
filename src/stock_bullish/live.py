@@ -20,7 +20,11 @@ LIVE_COLUMNS = [
     "量比",
     "振幅",
     "看涨评分",
+    "技术面评分",
+    "基本面评分",
     "评分",
+    "技术面分析",
+    "基本面分析",
     "入选理由",
 ]
 CACHE_PATH = Path("outputs/live-web/latest_spot.csv")
@@ -272,7 +276,7 @@ def _write_cached_spot(spot: pd.DataFrame) -> None:
         return
 
 
-def scan_live_candidates(limit: int = 20) -> tuple[dict[str, pd.DataFrame], str]:
+def scan_live_candidates(limit: int = 5) -> tuple[dict[str, pd.DataFrame], str]:
     spot = fetch_live_spot()
     candidates = rank_live_candidates(spot, limit=limit)
     return candidates, datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -284,9 +288,9 @@ def rank_live_candidates(spot: pd.DataFrame, limit: int = 20) -> dict[str, pd.Da
 
     df = _normalize_spot(spot)
     return {
-        "短期": _rank_period(df, "短期", _short_score(df), limit),
-        "中期": _rank_period(df, "中期", _mid_score(df), limit),
-        "长期": _rank_period(df, "长期", _long_score(df), limit),
+        "短期": _rank_period(df, "短期", *_short_scores(df), limit),
+        "中期": _rank_period(df, "中期", *_mid_scores(df), limit),
+        "长期": _rank_period(df, "长期", *_long_scores(df), limit),
     }
 
 
@@ -303,41 +307,66 @@ def _normalize_spot(spot: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _short_score(df: pd.DataFrame) -> pd.Series:
-    return (
+def _short_scores(df: pd.DataFrame) -> tuple[pd.Series, pd.Series, pd.Series]:
+    technical = (
         _clip_score(df["涨跌幅"], 0, 6) * 0.35
         + _clip_score(df["量比"], 0.8, 2.5) * 0.25
         + _clip_score(df["换手率"], 1, 8) * 0.20
         + _clip_score(df["成交额"], 100_000_000, 2_000_000_000) * 0.15
         + (100 - _clip_score(df["振幅"], 3, 12)) * 0.05
     )
+    fundamental = (
+        _valuation_score(df["市盈率-动态"], 5, 60) * 0.45
+        + _valuation_score(df["市净率"], 0.5, 8) * 0.35
+        + _clip_score(df["总市值"], 10_000_000_000, 300_000_000_000) * 0.20
+    )
+    return technical, fundamental, technical * 0.8 + fundamental * 0.2
 
 
-def _mid_score(df: pd.DataFrame) -> pd.Series:
-    return (
+def _mid_scores(df: pd.DataFrame) -> tuple[pd.Series, pd.Series, pd.Series]:
+    technical = (
         _clip_score(df["涨跌幅"], -1, 4) * 0.25
         + _clip_score(df["成交额"], 200_000_000, 3_000_000_000) * 0.25
         + _clip_score(df["换手率"], 0.8, 5) * 0.20
-        + _valuation_score(df["市盈率-动态"], 5, 45) * 0.15
-        + _valuation_score(df["市净率"], 0.5, 5) * 0.15
     )
+    fundamental = (
+        _valuation_score(df["市盈率-动态"], 5, 45) * 0.40
+        + _valuation_score(df["市净率"], 0.5, 5) * 0.35
+        + _clip_score(df["总市值"], 20_000_000_000, 500_000_000_000) * 0.25
+    )
+    return technical, fundamental, technical * 0.55 + fundamental * 0.45
 
 
-def _long_score(df: pd.DataFrame) -> pd.Series:
-    return (
+def _long_scores(df: pd.DataFrame) -> tuple[pd.Series, pd.Series, pd.Series]:
+    technical = (
         _clip_score(df["成交额"], 100_000_000, 2_000_000_000) * 0.10
-        + _clip_score(df["总市值"], 30_000_000_000, 500_000_000_000) * 0.20
-        + _valuation_score(df["市盈率-动态"], 5, 30) * 0.35
-        + _valuation_score(df["市净率"], 0.5, 3) * 0.25
+        + _clip_score(df["换手率"], 0.2, 4) * 0.10
         + _clip_score(df["涨跌幅"], -2, 3) * 0.10
     )
+    fundamental = (
+        _clip_score(df["总市值"], 30_000_000_000, 500_000_000_000) * 0.30
+        + _valuation_score(df["市盈率-动态"], 5, 30) * 0.40
+        + _valuation_score(df["市净率"], 0.5, 3) * 0.30
+    )
+    return technical, fundamental, technical * 0.25 + fundamental * 0.75
 
 
-def _rank_period(df: pd.DataFrame, period: str, score: pd.Series, limit: int) -> pd.DataFrame:
+def _rank_period(
+    df: pd.DataFrame,
+    period: str,
+    technical_score: pd.Series,
+    fundamental_score: pd.Series,
+    score: pd.Series,
+    limit: int,
+) -> pd.DataFrame:
     result = df.copy()
+    result["技术面评分"] = technical_score.round(2)
+    result["基本面评分"] = fundamental_score.round(2)
     result["评分"] = score.round(2)
     result["看涨评分"] = (50 + result["评分"] * 0.45).clip(0, 95).round(1)
     result["周期"] = period
+    result["技术面分析"] = result.apply(_technical_analysis, axis=1)
+    result["基本面分析"] = result.apply(_fundamental_analysis, axis=1)
     result["入选理由"] = result.apply(lambda row: _reason(row, period), axis=1)
     result = result[result["评分"] > 0].sort_values("评分", ascending=False).head(limit).copy()
     result["排名"] = range(1, len(result) + 1)
@@ -371,3 +400,38 @@ def _reason(row: pd.Series, period: str) -> str:
     if period in {"中期", "长期"} and 0 < row["市盈率-动态"] <= 45:
         reasons.append("估值未极端")
     return "、".join(reasons[:4]) or "综合评分靠前"
+
+
+def _technical_analysis(row: pd.Series) -> str:
+    points = []
+    if row["涨跌幅"] > 0:
+        points.append(f"价格走强，涨跌幅 {row['涨跌幅']:.2f}%")
+    if row["量比"] >= 1.2:
+        points.append(f"量比 {row['量比']:.2f}，成交活跃")
+    if row["换手率"] >= 1:
+        points.append(f"换手率 {row['换手率']:.2f}%")
+    if row["成交额"] >= 500_000_000:
+        points.append(f"成交额约 {row['成交额'] / 100_000_000:.1f} 亿元")
+    if not points:
+        points.append("实时技术指标没有明显强势信号")
+    return "技术面：" + "；".join(points[:3]) + "。"
+
+
+def _fundamental_analysis(row: pd.Series) -> str:
+    points = []
+    pe = row["市盈率-动态"]
+    pb = row["市净率"]
+    market_cap = row["总市值"]
+    if 0 < pe <= 45:
+        points.append(f"动态市盈率 {pe:.1f}，未处于规则定义的极端高估区")
+    elif pe > 45:
+        points.append(f"动态市盈率 {pe:.1f}，估值偏高需谨慎")
+    else:
+        points.append("动态市盈率缺失或不可用")
+    if 0 < pb <= 5:
+        points.append(f"市净率 {pb:.2f}，处于规则可接受区间")
+    elif pb > 5:
+        points.append(f"市净率 {pb:.2f}，账面估值偏高")
+    if market_cap > 0:
+        points.append(f"总市值约 {market_cap / 100_000_000:.0f} 亿元")
+    return "基本面：" + "；".join(points[:3]) + "。"

@@ -4,14 +4,39 @@ from stock_bullish.web import render_home_page, render_live_result_page
 
 
 def test_render_home_page_is_chinese_live_scanner_without_upload_form():
-    html = render_home_page()
+    candidates = {
+        "短期": pd.DataFrame(
+            {
+                "周期": ["短期"],
+                "排名": [1],
+                "代码": ["000001"],
+                "名称": ["平安银行"],
+                "看涨评分": [78.0],
+                "技术面评分": [82.0],
+                "基本面评分": [66.0],
+                "技术面分析": ["技术面：量比活跃，成交额较高。"],
+                "基本面分析": ["基本面：估值处在规则区间，市值规模较稳定。"],
+                "入选理由": ["技术面与基本面共同支持"],
+            }
+        ),
+        "中期": pd.DataFrame(),
+        "长期": pd.DataFrame(),
+    }
+
+    html = render_home_page(candidates=candidates, updated_at="2026-06-01 10:00:00")
 
     assert 'type="file"' not in html
-    assert "实时扫描" in html
-    assert "短期" in html
-    assert "中期" in html
-    assert "长期" in html
+    assert "实时扫描" not in html
+    assert "短期候选" in html
+    assert "中期候选" in html
+    assert "长期候选" in html
+    assert "固定展示每个周期 5 只" in html
     assert "看涨评分" in html
+    assert "技术面评分" in html
+    assert "基本面评分" in html
+    assert "技术面：" in html
+    assert "基本面：" in html
+    assert "完整财报分析" in html
     assert "规则评分，不是预测概率" in html
     assert "未纳入因素" in html
     assert "数据来源与覆盖范围" in html
