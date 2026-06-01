@@ -111,7 +111,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765, output_dir: str | Path = "o
             try:
                 candidates, updated_at = scan_live_candidates(limit=limit)
             except Exception as exc:  # noqa: BLE001
-                self._send_html(render_home_page(str(exc)), status=HTTPStatus.BAD_REQUEST)
+                self._send_html(render_home_page(str(exc)))
                 return
             self._send_html(render_live_result_page(candidates, updated_at))
 
