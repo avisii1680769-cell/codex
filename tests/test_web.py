@@ -1,6 +1,6 @@
 import pandas as pd
 
-from stock_bullish.web import render_home_page, render_live_result_page
+from stock_bullish.web import render_home_page, render_live_result_page, render_stock_report_page
 
 
 def test_render_home_page_is_chinese_live_scanner_without_upload_form():
@@ -86,6 +86,56 @@ def test_render_live_result_page_contains_candidate_sections():
     assert "不是买入建议" in html
     assert "看涨概率" not in html
     assert "推荐股票" not in html
+
+
+def test_render_home_page_contains_custom_stock_query_form():
+    html = render_home_page()
+
+    assert "个股代码查询" in html
+    assert 'action="/stock"' in html
+    assert 'name="code"' in html
+    assert "输入股票代码" in html
+
+
+def test_render_stock_report_page_shows_period_advice_and_report():
+    report = pd.DataFrame(
+        {
+            "周期": ["短期", "中期", "长期"],
+            "排名": [1, 1, 1],
+            "代码": ["000001", "000001", "000001"],
+            "名称": ["平安银行", "平安银行", "平安银行"],
+            "看涨评分": [70.0, 82.0, 76.0],
+            "技术面评分": [80.0, 75.0, 60.0],
+            "基本面评分": [60.0, 85.0, 90.0],
+            "风险等级": ["低", "低", "低"],
+            "技术面分析": ["技术面：量价配合。", "技术面：趋势平稳。", "技术面：长期波动可控。"],
+            "基本面分析": ["基本面：估值未极端。", "基本面：盈利质量较好。", "基本面：现金流较稳。"],
+            "建议持仓周期": ["建议持仓周期：3-5 个交易日。", "建议持仓周期：2-4 周。", "建议持仓周期：3-6 个月。"],
+            "入选理由": ["短线活跃", "综合评分最高", "基本面稳定"],
+        }
+    )
+
+    html = render_stock_report_page(
+        report,
+        updated_at="2026-06-02 10:00:00",
+        metadata={"recommended_period": "中期", "query_code": "000001"},
+    )
+
+    assert "个股分析报告" in html
+    assert "平安银行" in html
+    assert "当前更适合观察的周期" in html
+    assert "中期" in html
+    assert "建议持仓周期：2-4 周" in html
+    assert "短期分析" in html
+    assert "中期分析" in html
+    assert "长期分析" in html
+
+
+def test_render_stock_report_page_shows_query_error():
+    html = render_stock_report_page(error="请输入 6 位 A 股股票代码")
+
+    assert "请输入 6 位 A 股股票代码" in html
+    assert "个股代码查询" in html
 
 
 def test_render_home_page_marks_fallback_scope_honestly():

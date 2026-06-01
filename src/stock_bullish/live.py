@@ -400,6 +400,43 @@ def scan_live_candidates(limit: int = 5) -> tuple[dict[str, pd.DataFrame], str, 
     return candidates, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), metadata
 
 
+def analyze_stock_code(code: str) -> tuple[pd.DataFrame, str, dict[str, object]]:
+    normalized_code = _normalize_stock_code(code)
+    spot = _fetch_tencent_spot_for_codes([normalized_code])
+    spot = _filter_a_share_universe(spot)
+    if spot.empty:
+        raise ValueError(f"未查询到 {normalized_code} 的实时行情，可能不是可交易 A 股代码或行情源暂不可用。")
+    enriched_spot = _enrich_financial_evidence(spot)
+    candidates = rank_live_candidates(enriched_spot, limit=1)
+    candidates = _enrich_selected_risks(candidates)
+    frames = [frame for frame in candidates.values() if not frame.empty]
+    if not frames:
+        raise ValueError(f"{normalized_code} 当前没有足够数据生成分析报告。")
+    report = pd.concat(frames, ignore_index=True)
+    report["排名"] = 1
+    best = report.sort_values("评分", ascending=False).iloc[0]
+    metadata = {
+        "query_code": normalized_code,
+        "query_source": "个股代码查询",
+        "recommended_period": str(best["周期"]),
+        "recommended_holding": str(best.get("建议持仓周期", "")),
+        "data_source": "腾讯实时行情 + 东方财富财报/公告/资金接口",
+    }
+    return report, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), metadata
+
+
+def _normalize_stock_code(code: str) -> str:
+    normalized = str(code or "").strip()
+    if normalized.isdigit() and len(normalized) < 6:
+        normalized = normalized.zfill(6)
+    if len(normalized) != 6 or not normalized.isdigit():
+        raise ValueError("请输入 6 位 A 股股票代码，例如 600519 或 000001。")
+    allowed_prefixes = ("000", "001", "002", "003", "300", "301", "600", "601", "603", "605", "688", "689")
+    if not normalized.startswith(allowed_prefixes):
+        raise ValueError("请输入沪深主板、创业板或科创板的 6 位 A 股股票代码。")
+    return normalized
+
+
 def _prepare_deep_analysis_spot(spot: pd.DataFrame, limit: int) -> pd.DataFrame:
     if spot.empty or len(spot) <= 500:
         return spot

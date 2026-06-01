@@ -1,7 +1,7 @@
 import pandas as pd
 
 from stock_bullish import live
-from stock_bullish.live import rank_live_candidates
+from stock_bullish.live import analyze_stock_code, rank_live_candidates
 
 
 def test_rank_live_candidates_scores_short_mid_long_candidates():
@@ -77,6 +77,46 @@ def test_rank_live_candidates_returns_stable_columns_for_empty_input():
         "建议持仓周期",
         "入选理由",
     ]
+
+
+def test_analyze_stock_code_returns_three_period_report_and_best_period(monkeypatch):
+    spot = pd.DataFrame(
+        {
+            "代码": ["000001"],
+            "名称": ["平安银行"],
+            "最新价": [10.0],
+            "涨跌幅": [3.0],
+            "成交额": [1_000_000_000],
+            "换手率": [3.0],
+            "量比": [1.6],
+            "振幅": [4.0],
+            "市盈率-动态": [7.0],
+            "市净率": [0.8],
+            "总市值": [200_000_000_000],
+        }
+    )
+
+    monkeypatch.setattr(live, "_fetch_tencent_spot_for_codes", lambda codes: spot)
+    monkeypatch.setattr(live, "_enrich_financial_evidence", lambda frame: frame)
+    monkeypatch.setattr(live, "_enrich_selected_risks", lambda candidates: candidates)
+
+    report, updated_at, metadata = analyze_stock_code("1")
+
+    assert updated_at
+    assert report["代码"].tolist() == ["000001", "000001", "000001"]
+    assert set(report["周期"]) == {"短期", "中期", "长期"}
+    assert metadata["query_code"] == "000001"
+    assert metadata["recommended_period"] == report.sort_values("评分", ascending=False).iloc[0]["周期"]
+    assert "建议持仓周期" in report.columns
+
+
+def test_analyze_stock_code_rejects_invalid_code():
+    try:
+        analyze_stock_code("abc")
+    except ValueError as exc:
+        assert "请输入 6 位 A 股股票代码" in str(exc)
+    else:
+        raise AssertionError("invalid code should fail")
 
 
 def test_rank_live_candidates_uses_technical_and_fundamental_scores():

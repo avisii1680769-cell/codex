@@ -4,10 +4,11 @@ import html
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import pandas as pd
 
-from stock_bullish.live import PERIODS, scan_live_candidates
+from stock_bullish.live import PERIODS, analyze_stock_code, scan_live_candidates
 
 HOME_LIMIT = 5
 
@@ -25,6 +26,10 @@ main{padding:24px 32px;max-width:1240px;margin:0 auto}
 .score-row{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
 .score{background:#eef7f6;border:1px solid #c7e2de;border-radius:6px;padding:5px 7px;font-size:12px}
 .analysis{font-size:13px;line-height:1.5;margin:7px 0;color:#243b53}
+.query-form{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+.query-form input{min-width:220px;flex:1;border:1px solid #b8c7d3;border-radius:6px;padding:10px;font-size:14px}
+.query-form button,.link-button{border:1px solid #0f766e;background:#0f766e;color:white;border-radius:6px;padding:10px 14px;font-size:14px;text-decoration:none;cursor:pointer}
+.link-button{display:inline-block;margin-top:8px}
 .error{border-color:#f5c2c7;background:#fff5f5;color:#842029}
 .hint{color:#52616b;font-size:13px;line-height:1.5}
 .risk{background:#fff8e6;border-color:#f3d19e}
@@ -50,6 +55,7 @@ def render_home_page(
         f"""
         {error_html}
         <section class="panel">
+          {_stock_query_form()}
           <div class="metrics">
             <div class="metric"><span>展示规则</span><strong>每周期 5 只</strong></div>
             <div class="metric"><span>更新时间</span><strong>{updated}</strong></div>
@@ -72,13 +78,38 @@ def render_live_result_page(candidates: dict[str, pd.DataFrame], updated_at: str
     return render_home_page(candidates=candidates, updated_at=updated_at)
 
 
+def render_stock_report_page(
+    report: pd.DataFrame | None = None,
+    updated_at: str | None = None,
+    metadata: dict[str, object] | None = None,
+    error: str | None = None,
+) -> str:
+    error_html = f'<section class="panel error">{html.escape(error)}</section>' if error else ""
+    body = f"""
+      <section class="panel">
+        {_stock_query_form()}
+        <p class="hint">输入股票代码后，页面会按同一套技术面、基本面、财报质量、公告新闻、资金面和风险证据，分别生成短期、中期、长期三档分析。</p>
+      </section>
+      {error_html}
+    """
+    if report is not None and not report.empty:
+        body += _stock_report_panel(report, updated_at, metadata or {})
+    body += _model_truth_panel()
+    return _page("个股分析报告", body)
+
+
 def serve(host: str = "127.0.0.1", port: int = 8765, output_dir: str | Path = "outputs/web") -> None:
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
-            if self.path in {"/", "/scan"}:
+            parsed = urlparse(self.path)
+            if parsed.path in {"/", "/scan"}:
                 self._run_home_scan()
+                return
+            if parsed.path == "/stock":
+                code = parse_qs(parsed.query).get("code", [""])[0]
+                self._run_stock_query(code)
                 return
             self.send_error(HTTPStatus.NOT_FOUND)
 
@@ -95,6 +126,14 @@ def serve(host: str = "127.0.0.1", port: int = 8765, output_dir: str | Path = "o
                 self._send_html(render_home_page(error=str(exc)))
                 return
             self._send_html(render_home_page(candidates=candidates, updated_at=updated_at, metadata=metadata))
+
+        def _run_stock_query(self, code: str) -> None:
+            try:
+                report, updated_at, metadata = analyze_stock_code(code)
+            except Exception as exc:  # noqa: BLE001
+                self._send_html(render_stock_report_page(error=str(exc)))
+                return
+            self._send_html(render_stock_report_page(report=report, updated_at=updated_at, metadata=metadata))
 
         def log_message(self, format: str, *args: object) -> None:
             return
@@ -126,6 +165,63 @@ def _page(title: str, body: str) -> str:
   <main>{body}</main>
 </body>
 </html>"""
+
+
+def _stock_query_form() -> str:
+    return """
+    <div>
+      <h2>个股代码查询</h2>
+      <form class="query-form" method="get" action="/stock">
+        <input name="code" inputmode="numeric" pattern="[0-9]{1,6}" placeholder="输入股票代码，如 600519 或 000001" aria-label="股票代码">
+        <button type="submit">查询分析报告</button>
+      </form>
+    </div>
+    """
+
+
+def _stock_report_panel(report: pd.DataFrame, updated_at: str | None, metadata: dict[str, object]) -> str:
+    best_period = str(metadata.get("recommended_period", ""))
+    best_row = _best_period_row(report, best_period)
+    name = html.escape(str(best_row.get("名称", "")))
+    code = html.escape(str(best_row.get("代码", metadata.get("query_code", ""))))
+    holding = html.escape(str(best_row.get("建议持仓周期", metadata.get("recommended_holding", ""))))
+    updated = html.escape(updated_at or "等待行情源返回")
+    sections = []
+    for period in PERIODS:
+        period_frame = report[report["周期"] == period]
+        title = f"{period}分析"
+        if period == best_period:
+            title += "（当前更适合观察的周期）"
+        sections.append(
+            f"""
+            <section class="panel">
+              <h2>{html.escape(title)}</h2>
+              {_candidate_cards(period_frame, limit=1)}
+            </section>
+            """
+        )
+    return f"""
+    <section class="panel">
+      <h2>{name} {code}</h2>
+      <div class="metrics">
+        <div class="metric"><span>当前更适合观察的周期</span><strong>{html.escape(best_period)}</strong></div>
+        <div class="metric"><span>更新时间</span><strong>{updated}</strong></div>
+        <div class="metric"><span>分析口径</span><strong>三周期同源评分</strong></div>
+      </div>
+      <p class="analysis">{holding}</p>
+      <p class="hint">这是规则评分下的周期适配结论，不是买入建议；如果公告、新闻或资金数据未取得，页面会在报告中明确显示。</p>
+      <a class="link-button" href="/">返回首页候选</a>
+    </section>
+    {"".join(sections)}
+    """
+
+
+def _best_period_row(report: pd.DataFrame, best_period: str) -> pd.Series:
+    if best_period and "周期" in report.columns:
+        matched = report[report["周期"] == best_period]
+        if not matched.empty:
+            return matched.iloc[0]
+    return report.sort_values("评分", ascending=False).iloc[0]
 
 
 def _model_truth_panel() -> str:
@@ -189,11 +285,11 @@ def _candidate_sections(candidates: dict[str, pd.DataFrame]) -> str:
     return "\n".join(sections)
 
 
-def _candidate_cards(frame: pd.DataFrame) -> str:
+def _candidate_cards(frame: pd.DataFrame, limit: int = HOME_LIMIT) -> str:
     if frame.empty:
         return '<p class="hint">暂无符合条件的数据。</p>'
     cards = []
-    for _, row in frame.head(HOME_LIMIT).iterrows():
+    for _, row in frame.head(limit).iterrows():
         cards.append(
             f"""
             <article class="candidate">
