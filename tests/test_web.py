@@ -200,10 +200,12 @@ def test_render_stock_report_page_shows_period_advice_and_report():
     assert "中期分析" in html
     assert "长期分析" in html
     assert "<details" in html
+    assert "查看交易计划参考" in html
     assert "查看完整分析" in html
     assert "展开完整分析" not in html
-    assert html.index("<h3>1. 平安银行 000001</h3>") < html.index("<h4>交易计划参考</h4>")
-    assert html.index("<h4>交易计划参考</h4>") < html.index("<details")
+    assert "<h4>交易计划参考</h4>" not in html
+    assert html.index("<h3>1. 平安银行 000001</h3>") < html.index("<summary>查看交易计划参考</summary>")
+    assert html.index("<summary>查看交易计划参考</summary>") < html.index("<summary>查看完整分析</summary>")
     assert "交易计划参考：观察价 10.00，计划买入区间" not in html
     assert "技术面：趋势平稳。" in html
 

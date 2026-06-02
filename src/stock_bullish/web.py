@@ -729,11 +729,11 @@ def _trade_plan_block(row: pd.Series) -> str:
     chase_rule = str(row.get("追高纪律", "")).strip()
     chase_html = f'<p class="analysis">{html.escape(chase_rule)}</p>' if chase_rule else ""
     return f"""
-      <div class="detail-report">
-        <h4>交易计划参考</h4>
+      <details class="detail-report trade-plan-detail">
+        <summary>查看交易计划参考</summary>
         <div class="score-row">{field_html}</div>
         {chase_html}
-      </div>
+      </details>
     """
 
 
