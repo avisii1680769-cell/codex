@@ -13,6 +13,7 @@ from stock_bullish.live import PERIODS, analyze_stock_code, scan_live_candidates
 
 HOME_LIMIT = 5
 HOME_CACHE_PATH = Path("outputs/web/home_candidates.pkl")
+REVIEW_SNAPSHOT_PATH = Path("outputs/review/recommendation_snapshots.csv")
 _HOME_SCAN_LOCK = threading.Lock()
 _HOME_SCAN_RUNNING = False
 
@@ -44,6 +45,10 @@ main{padding:24px 32px;max-width:1240px;margin:0 auto}
 .truth{background:#f7fbff;border-color:#cfe3f5}
 .truth h2,.risk h2{margin-top:0}
 .truth ul,.risk ul{margin-bottom:0}
+.review-table-wrap{overflow-x:auto}
+.review-table{width:100%;border-collapse:collapse;font-size:13px;min-width:980px}
+.review-table th,.review-table td{border-bottom:1px solid #e6edf3;padding:8px;text-align:left;vertical-align:top}
+.review-table th{background:#eef7f6;color:#172026}
 """
 
 
@@ -58,6 +63,7 @@ def render_home_page(
     updated = html.escape(updated_at or "等待行情源返回")
     total = sum(len(frame) for frame in (candidates or {}).values())
     scope_html = _scope_panel(metadata)
+    review_html = _review_panel()
     return _page(
         "A 股多周期候选评分",
         f"""
@@ -76,6 +82,7 @@ def render_home_page(
           <h2>实事求是的边界</h2>
           <p>这里不是荐股结论，也不是买入建议。页面会尽量抓取行情、估值、财报、公告、融资融券、互联互通持仓和主力资金接口；接口不可用或口径不稳定时，会明确显示未取得可靠数据，不把占位信息当成判断依据。</p>
         </section>
+        {review_html}
         {candidate_html}
         {_model_truth_panel()}
         """,
@@ -139,6 +146,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765, output_dir: str | Path = "o
             metadata = dict(metadata)
             metadata["data_state"] = "最新扫描完成"
             _write_home_cache(candidates, updated_at, metadata)
+            _append_recommendation_snapshot(candidates, updated_at, metadata)
             self._send_html(render_home_page(candidates=candidates, updated_at=updated_at, metadata=metadata))
 
         def _run_home_cached(self) -> None:
@@ -224,6 +232,72 @@ def _write_home_cache(candidates: dict[str, pd.DataFrame], updated_at: str, meta
         return
 
 
+def _append_recommendation_snapshot(
+    candidates: dict[str, pd.DataFrame],
+    updated_at: str,
+    metadata: dict[str, object],
+) -> None:
+    rows = []
+    for period in PERIODS:
+        frame = candidates.get(period, pd.DataFrame())
+        if frame.empty:
+            continue
+        for _, row in frame.head(HOME_LIMIT).iterrows():
+            rows.append(
+                {
+                    "快照时间": str(updated_at),
+                    "周期": period,
+                    "排名": row.get("排名", ""),
+                    "代码": str(row.get("代码", "")).zfill(6),
+                    "名称": row.get("名称", ""),
+                    "推荐快照价": row.get("最新价", ""),
+                    "当日涨跌幅": row.get("涨跌幅", ""),
+                    "看涨评分": row.get("看涨评分", ""),
+                    "技术面评分": row.get("技术面评分", ""),
+                    "基本面评分": row.get("基本面评分", ""),
+                    "风险等级": row.get("风险等级", ""),
+                    "追高风险": row.get("追高风险", ""),
+                    "建议持仓周期": row.get("建议持仓周期", ""),
+                    "综合结论": row.get("综合结论", ""),
+                    "入选理由": row.get("入选理由", ""),
+                    "扫描范围": metadata.get("scan_scope", ""),
+                    "数据源": metadata.get("data_source", ""),
+                }
+            )
+    if not rows:
+        return
+    snapshot = pd.DataFrame(rows)
+    try:
+        REVIEW_SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        if REVIEW_SNAPSHOT_PATH.exists():
+            existing = pd.read_csv(REVIEW_SNAPSHOT_PATH, dtype={"代码": str})
+            snapshot = pd.concat([existing, snapshot], ignore_index=True)
+        snapshot["代码"] = snapshot["代码"].astype(str).str.zfill(6)
+        snapshot = snapshot.drop_duplicates(subset=["快照时间", "周期", "代码"], keep="last")
+        snapshot.to_csv(REVIEW_SNAPSHOT_PATH, index=False, encoding="utf-8-sig")
+    except Exception:
+        return
+
+
+def _read_latest_recommendation_snapshot() -> pd.DataFrame:
+    if not REVIEW_SNAPSHOT_PATH.exists():
+        return pd.DataFrame()
+    try:
+        snapshot = pd.read_csv(REVIEW_SNAPSHOT_PATH, dtype={"代码": str})
+    except Exception:
+        return pd.DataFrame()
+    if snapshot.empty or "快照时间" not in snapshot.columns:
+        return pd.DataFrame()
+    latest_time = snapshot["快照时间"].dropna().astype(str).max()
+    latest = snapshot[snapshot["快照时间"].astype(str) == latest_time].copy()
+    latest["_period_order"] = latest.get("周期", pd.Series(dtype=str)).map(
+        {period: index for index, period in enumerate(PERIODS)}
+    )
+    latest["_period_order"] = pd.to_numeric(latest["_period_order"], errors="coerce").fillna(99)
+    latest["_rank_order"] = pd.to_numeric(latest.get("排名", 99), errors="coerce").fillna(99)
+    return latest.sort_values(["_period_order", "_rank_order"]).drop(columns=["_period_order", "_rank_order"])
+
+
 def _start_background_home_scan() -> None:
     global _HOME_SCAN_RUNNING
     with _HOME_SCAN_LOCK:
@@ -236,6 +310,7 @@ def _start_background_home_scan() -> None:
         try:
             candidates, updated_at, metadata = scan_live_candidates(limit=HOME_LIMIT)
             _write_home_cache(candidates, updated_at, metadata)
+            _append_recommendation_snapshot(candidates, updated_at, metadata)
         except Exception as exc:  # noqa: BLE001
             print(f"background home scan failed: {exc}")
         finally:
@@ -363,6 +438,59 @@ def _scope_panel(metadata: dict[str, object] | None) -> str:
       </div>
       <p class="hint">数据源：{html.escape(data_source)}</p>
       {warning}
+    </section>
+    """
+
+
+def _review_panel() -> str:
+    snapshot = _read_latest_recommendation_snapshot()
+    if snapshot.empty:
+        return """
+        <section class="panel">
+          <h2>每日复盘</h2>
+          <p class="hint">暂无复盘记录。完成一次行情更新后，系统会记录推荐快照价和当日涨跌幅，后续补齐收盘价、次日表现后再计算真实复盘结果。</p>
+        </section>
+        """
+    latest_time = html.escape(str(snapshot.iloc[0].get("快照时间", "")))
+    rows = []
+    for _, row in snapshot.iterrows():
+        rows.append(
+            f"""
+            <tr>
+              <td>{html.escape(str(row.get("周期", "")))}</td>
+              <td>{html.escape(str(row.get("排名", "")))}</td>
+              <td>{html.escape(str(row.get("名称", "")))} {html.escape(str(row.get("代码", "")))}</td>
+              <td>{html.escape(_fmt(row.get("推荐快照价")))}</td>
+              <td>{html.escape(_fmt(row.get("当日涨跌幅")))}</td>
+              <td>{html.escape(_fmt(row.get("看涨评分")))}</td>
+              <td>{html.escape(str(row.get("风险等级", "")))}</td>
+              <td>{html.escape(str(row.get("建议持仓周期", "")))}</td>
+              <td>{html.escape(str(row.get("入选理由", "")))}</td>
+            </tr>
+            """
+        )
+    return f"""
+    <section class="panel">
+      <h2>每日复盘</h2>
+      <p class="hint">推荐快照：{latest_time}。这里只记录推荐快照价和当日涨跌幅，不把快照当成已实现收益；真实结果必须等收盘价、次日行情和持仓周期结束后再复盘。</p>
+      <div class="review-table-wrap">
+        <table class="review-table">
+          <thead>
+            <tr>
+              <th>周期</th>
+              <th>排名</th>
+              <th>股票</th>
+              <th>快照价</th>
+              <th>当日涨跌幅</th>
+              <th>看涨评分</th>
+              <th>风险</th>
+              <th>持仓建议</th>
+              <th>入选理由</th>
+            </tr>
+          </thead>
+          <tbody>{"".join(rows)}</tbody>
+        </table>
+      </div>
     </section>
     """
 

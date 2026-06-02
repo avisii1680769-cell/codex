@@ -228,3 +228,96 @@ def test_render_home_page_marks_fallback_scope_honestly():
 
     assert "高流动性观察池" in html
     assert "不是全 A 股扫描" in html
+
+
+def test_append_recommendation_snapshot_records_candidates(tmp_path, monkeypatch):
+    snapshot_path = tmp_path / "recommendation_snapshots.csv"
+    monkeypatch.setattr(web, "REVIEW_SNAPSHOT_PATH", snapshot_path)
+    candidates = {
+        "短期": pd.DataFrame(
+            {
+                "周期": ["短期"],
+                "排名": [1],
+                "代码": ["000001"],
+                "名称": ["平安银行"],
+                "最新价": [12.34],
+                "涨跌幅": [1.2],
+                "看涨评分": [76.6],
+                "技术面评分": [67.0],
+                "基本面评分": [28.1],
+                "风险等级": ["低"],
+                "追高风险": ["追高风险：低；未触发明显追高风险。"],
+                "建议持仓周期": ["建议持仓周期：1-2 个交易日。"],
+                "综合结论": ["综合结论：短期观察。"],
+                "入选理由": ["价格走强、换手充分、成交额较高"],
+            }
+        ),
+        "中期": pd.DataFrame(),
+        "长期": pd.DataFrame(),
+    }
+
+    web._append_recommendation_snapshot(
+        candidates,
+        "2026-06-02 15:00:00",
+        {"scan_scope": "全A股实时行情", "data_source": "测试行情源"},
+    )
+    web._append_recommendation_snapshot(
+        candidates,
+        "2026-06-02 15:00:00",
+        {"scan_scope": "全A股实时行情", "data_source": "测试行情源"},
+    )
+
+    saved = pd.read_csv(snapshot_path, dtype={"代码": str})
+    assert len(saved) == 1
+    assert saved.iloc[0]["快照时间"] == "2026-06-02 15:00:00"
+    assert saved.iloc[0]["周期"] == "短期"
+    assert saved.iloc[0]["代码"] == "000001"
+    assert saved.iloc[0]["推荐快照价"] == 12.34
+    assert saved.iloc[0]["当日涨跌幅"] == 1.2
+    assert saved.iloc[0]["扫描范围"] == "全A股实时行情"
+
+
+def test_render_home_page_shows_review_snapshot_panel(tmp_path, monkeypatch):
+    snapshot_path = tmp_path / "recommendation_snapshots.csv"
+    monkeypatch.setattr(web, "REVIEW_SNAPSHOT_PATH", snapshot_path)
+    pd.DataFrame(
+        [
+            {
+                "快照时间": "2026-06-02 15:00:00",
+                "周期": "短期",
+                "排名": 1,
+                "代码": "000001",
+                "名称": "平安银行",
+                "推荐快照价": 12.34,
+                "当日涨跌幅": 1.2,
+                "看涨评分": 76.6,
+                "技术面评分": 67.0,
+                "基本面评分": 28.1,
+                "风险等级": "低",
+                "追高风险": "追高风险：低；未触发明显追高风险。",
+                "建议持仓周期": "建议持仓周期：1-2 个交易日。",
+                "综合结论": "综合结论：短期观察。",
+                "入选理由": "价格走强、换手充分、成交额较高",
+                "扫描范围": "全A股实时行情",
+                "数据源": "测试行情源",
+            }
+        ]
+    ).to_csv(snapshot_path, index=False, encoding="utf-8-sig")
+
+    html = render_home_page()
+
+    assert "每日复盘" in html
+    assert "推荐快照" in html
+    assert "2026-06-02 15:00:00" in html
+    assert "平安银行" in html
+    assert "记录推荐快照价和当日涨跌幅" in html
+    assert "不把快照当成已实现收益" in html
+
+
+def test_render_home_page_shows_empty_review_state(tmp_path, monkeypatch):
+    monkeypatch.setattr(web, "REVIEW_SNAPSHOT_PATH", tmp_path / "missing.csv")
+
+    html = render_home_page()
+
+    assert "每日复盘" in html
+    assert "暂无复盘记录" in html
