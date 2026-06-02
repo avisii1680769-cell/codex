@@ -9,6 +9,7 @@ import pandas as pd
 import requests
 
 PERIODS = ("短期", "中期", "长期")
+DEMON_PERIOD = "妖股"
 LIVE_COLUMNS = [
     "周期",
     "排名",
@@ -399,10 +400,11 @@ def _write_cached_spot(spot: pd.DataFrame) -> None:
         return
 
 
-def scan_live_candidates(limit: int = 5) -> tuple[dict[str, pd.DataFrame], str, dict[str, object]]:
+def scan_live_candidates(limit: int = 5, demon_limit: int = 4) -> tuple[dict[str, pd.DataFrame], str, dict[str, object]]:
     spot = fetch_live_spot()
     analysis_spot = _prepare_deep_analysis_spot(spot, limit)
     candidates = rank_live_candidates(analysis_spot, limit=limit)
+    candidates[DEMON_PERIOD] = rank_demon_candidates(analysis_spot, limit=demon_limit)
     candidates = _enrich_selected_risks(candidates)
     metadata = {
         "raw_count": int(spot.attrs.get("raw_count", len(spot))),
@@ -485,6 +487,7 @@ def _prepare_deep_analysis_spot(spot: pd.DataFrame, limit: int) -> pd.DataFrame:
     if spot.empty or len(spot) <= 500:
         return spot
     preliminary = rank_live_candidates(spot, limit=max(limit * 10, 50))
+    preliminary[DEMON_PERIOD] = rank_demon_candidates(spot, limit=max(limit * 10, 50))
     codes = {
         str(code).zfill(6)
         for frame in preliminary.values()
@@ -510,6 +513,31 @@ def rank_live_candidates(spot: pd.DataFrame, limit: int = 20) -> dict[str, pd.Da
         "中期": _rank_period(df, "中期", *_mid_scores(df), limit),
         "长期": _rank_period(df, "长期", *_long_scores(df), limit),
     }
+
+
+def rank_demon_candidates(spot: pd.DataFrame, limit: int = 4) -> pd.DataFrame:
+    if spot.empty:
+        return pd.DataFrame(columns=LIVE_COLUMNS)
+    df = _normalize_spot(spot)
+    df = _add_industry_proxy(df)
+    emotion_score = (
+        _clip_score(df["涨跌幅"], 3, 10) * 0.30
+        + _clip_score(df["换手率"], 5, 25) * 0.25
+        + _clip_score(df["量比"], 1.5, 6) * 0.20
+        + _clip_score(df["成交额"], 500_000_000, 5_000_000_000) * 0.15
+        + _clip_score(df["振幅"], 4, 15) * 0.10
+    )
+    liquidity_score = _clip_score(df["成交额"], 300_000_000, 3_000_000_000)
+    score = emotion_score * 0.90 + liquidity_score * 0.10
+    fundamental = (
+        _valuation_score(df["市盈率-动态"], 5, 80) * 0.25
+        + _valuation_score(df["市净率"], 0.5, 8) * 0.25
+        + _clip_score(df["总市值"], 5_000_000_000, 80_000_000_000) * 0.50
+    )
+    ranked = _rank_period(df, DEMON_PERIOD, emotion_score, fundamental, score, limit)
+    if not ranked.empty:
+        ranked["入选理由"] = ranked.apply(_demon_reason, axis=1)
+    return ranked
 
 
 def _normalize_spot(spot: pd.DataFrame) -> pd.DataFrame:
@@ -696,6 +724,21 @@ def _reason(row: pd.Series, period: str) -> str:
     if period in {"中期", "长期"} and 0 < row["市盈率-动态"] <= 45:
         reasons.append("估值未极端")
     return "、".join(reasons[:4]) or "综合评分靠前"
+
+
+def _demon_reason(row: pd.Series) -> str:
+    reasons = []
+    if _row_number(row, "涨跌幅") >= 5:
+        reasons.append("短线涨幅强")
+    if _row_number(row, "换手率") >= 8:
+        reasons.append("换手充分")
+    if _row_number(row, "量比") >= 2:
+        reasons.append("量比活跃")
+    if _row_number(row, "成交额") >= 500_000_000:
+        reasons.append("成交额放大")
+    if _row_number(row, "振幅") >= 6:
+        reasons.append("情绪波动大")
+    return "、".join(reasons[:4]) or "短线情绪评分靠前"
 
 
 def _technical_analysis(row: pd.Series) -> str:
@@ -1015,6 +1058,9 @@ def _holding_period_advice(row: pd.Series, period: str) -> str:
 
     hot_trade = turnover >= 20 or volume_ratio >= 5 or change_pct >= 9.5
 
+    if period == DEMON_PERIOD:
+        return "建议持仓周期：1-2 个交易日；妖股池只适合高风险短线情绪观察，不能按中长期逻辑持有。"
+
     if period == "短期":
         if hot_trade or risk_flags >= 2:
             return "建议持仓周期：1-2 个交易日；高换手或风险提示较强，必须按短线纪律观察。"
@@ -1069,6 +1115,8 @@ def _trading_conclusion(row: pd.Series, period: str) -> str:
     risk_level = str(row.get("风险等级", "待核查"))
     opposition = str(row.get("反对证据", ""))
     chase_risk = str(row.get("追高风险", "")) or _chase_risk_analysis(row)
+    if period == DEMON_PERIOD:
+        return "综合结论：高风险短线情绪观察；只看资金接力和退潮信号，不代表基本面看涨。"
     if "追高风险：高" in chase_risk:
         return f"综合结论：{period}只观察；追高风险较高，不能把强势信号当成直接介入理由。"
     if risk_level == "高" or score < 35:
@@ -1088,6 +1136,8 @@ def _operation_tempo(row: pd.Series, period: str) -> str:
     volume_ratio = _row_number(row, "量比")
     risk_level = str(row.get("风险等级", "待核查"))
     chase_risk = str(row.get("追高风险", "")) or _chase_risk_analysis(row)
+    if period == DEMON_PERIOD:
+        return "操作节奏：只观察情绪接力，不追高；一旦放量滞涨、跌破观察价或出现监管风险，立即降级。"
     if "追高风险：高" in chase_risk:
         return "操作节奏：只适合观察，不追高；等待回踩承接、风险公告消化和资金分歧缓和。"
     if risk_level in {"中", "高"}:
@@ -1142,7 +1192,12 @@ def _trade_plan(row: pd.Series, period: str) -> dict[str, object]:
     risk_level = str(row.get("风险等级", "待核查"))
     high_chase = "追高风险：高" in chase_risk or risk_level == "高"
 
-    if period == "短期":
+    if period == DEMON_PERIOD:
+        pullback_pct = min(max(amplitude * 0.30, 1.0), 3.0)
+        stop_pct = min(max(amplitude * 0.60, 3.0), 6.0)
+        target_one_pct = max(stop_pct * 1.20, 3.0)
+        target_two_pct = max(stop_pct * 1.80, 5.0)
+    elif period == "短期":
         pullback_pct = min(max(amplitude * 0.35, 1.2), 3.5)
         stop_pct = min(max(amplitude * 0.55, 3.0), 6.0)
         target_one_pct = max(stop_pct * 1.25, 3.0)

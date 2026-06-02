@@ -24,6 +24,22 @@ def test_render_home_page_is_chinese_live_scanner_without_upload_form():
         ),
         "中期": pd.DataFrame(),
         "长期": pd.DataFrame(),
+        "妖股": pd.DataFrame(
+            {
+                "周期": ["妖股"],
+                "排名": [1],
+                "代码": ["000003"],
+                "名称": ["情绪龙头"],
+                "看涨评分": [90.0],
+                "技术面评分": [95.0],
+                "基本面评分": [20.0],
+                "风险等级": ["高"],
+                "追高风险": ["追高风险：高；涨幅偏高；换手或量比过热。"],
+                "建议持仓周期": ["建议持仓周期：1-2 个交易日；妖股池只适合高风险短线情绪观察。"],
+                "交易计划参考": ["交易计划参考：观察价 10.00，计划买入区间 只观察。"],
+                "入选理由": ["短线情绪强、换手充分、量比活跃"],
+            }
+        ),
     }
 
     html = render_home_page(
@@ -44,6 +60,10 @@ def test_render_home_page_is_chinese_live_scanner_without_upload_form():
     assert "短期候选" in html
     assert "中期候选" in html
     assert "长期候选" in html
+    assert "妖股观察池" in html
+    assert "固定 4 只" in html
+    assert "高风险短线情绪观察" in html
+    assert "情绪龙头" in html
     assert "固定展示每个周期 8 只" in html
     assert "全A股实时行情" in html
     assert "5857" in html
@@ -87,6 +107,7 @@ def test_render_live_result_page_contains_candidate_sections():
     assert "短期候选" in html
     assert "中期候选" in html
     assert "长期候选" in html
+    assert "妖股观察池" in html
     assert "强势股" in html
     assert "看涨评分" in html
     assert "不是买入建议" in html
@@ -205,7 +226,15 @@ def test_home_cache_round_trips_candidates(tmp_path, monkeypatch):
                 "追高风险": ["追高风险：低；未触发明显追高风险。"],
                 "交易计划参考": ["交易计划参考：观察价 10.00，计划买入区间 9.80-10.10。"],
             }
-        )
+        ),
+        "妖股": pd.DataFrame(
+            {
+                "代码": ["000003"],
+                "名称": ["情绪龙头"],
+                "追高风险": ["追高风险：高；涨幅偏高；换手或量比过热。"],
+                "交易计划参考": ["交易计划参考：观察价 10.00，计划买入区间 只观察。"],
+            }
+        ),
     }
     metadata = {"scan_scope": "测试缓存"}
 
@@ -218,7 +247,9 @@ def test_home_cache_round_trips_candidates(tmp_path, monkeypatch):
     assert updated_at == "2026-06-02 10:00:00"
     assert cached_metadata["scan_scope"] == "测试缓存"
     assert cached_metadata["home_limit"] == web.HOME_LIMIT
+    assert cached_metadata["demon_limit"] == web.DEMON_LIMIT
     assert cached_candidates["短期"].iloc[0]["代码"] == "000001"
+    assert cached_candidates["妖股"].iloc[0]["代码"] == "000003"
 
 
 def test_home_cache_rejects_old_candidates_without_chase_risk(tmp_path, monkeypatch):

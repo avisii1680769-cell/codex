@@ -9,9 +9,10 @@ from urllib.parse import parse_qs, urlparse
 
 import pandas as pd
 
-from stock_bullish.live import PERIODS, analyze_stock_code, scan_live_candidates
+from stock_bullish.live import DEMON_PERIOD, PERIODS, analyze_stock_code, scan_live_candidates
 
 HOME_LIMIT = 8
+DEMON_LIMIT = 4
 HOME_CACHE_PATH = Path("outputs/web/home_candidates.pkl")
 REVIEW_SNAPSHOT_PATH = Path("outputs/review/recommendation_snapshots.csv")
 _HOME_SCAN_LOCK = threading.Lock()
@@ -71,11 +72,11 @@ def render_home_page(
         <section class="panel">
           {_stock_query_form()}
           <div class="metrics">
-            <div class="metric"><span>展示规则</span><strong>每周期 8 只</strong></div>
+            <div class="metric"><span>展示规则</span><strong>每周期 8 只 + 妖股 4 只</strong></div>
             <div class="metric"><span>更新时间</span><strong>{updated}</strong></div>
             <div class="metric"><span>候选总数</span><strong>{total}</strong></div>
           </div>
-          <p class="hint">首页固定展示每个周期 8 只候选，不需要输入数量扫描。排序同时使用技术面评分和基本面评分。</p>
+          <p class="hint">首页固定展示每个周期 8 只候选，另设妖股观察池固定 4 只，不需要输入数量扫描。短中长期排序同时使用技术面评分和基本面评分；妖股池只看短线情绪强度和风险纪律。</p>
         </section>
         {scope_html}
         <section class="panel risk">
@@ -139,7 +140,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765, output_dir: str | Path = "o
 
         def _run_home_scan(self) -> None:
             try:
-                candidates, updated_at, metadata = scan_live_candidates(limit=HOME_LIMIT)
+                candidates, updated_at, metadata = scan_live_candidates(limit=HOME_LIMIT, demon_limit=DEMON_LIMIT)
             except Exception as exc:  # noqa: BLE001
                 self._send_html(render_home_page(error=str(exc)))
                 return
@@ -216,7 +217,9 @@ def _read_home_cache() -> tuple[dict[str, pd.DataFrame], str, dict[str, object]]
     candidates, updated_at, metadata = cached
     if not isinstance(candidates, dict) or not isinstance(metadata, dict):
         return None
-    if metadata.get("home_limit") != HOME_LIMIT:
+    if metadata.get("home_limit") != HOME_LIMIT or metadata.get("demon_limit") != DEMON_LIMIT:
+        return None
+    if DEMON_PERIOD not in candidates:
         return None
     if any(
         isinstance(frame, pd.DataFrame)
@@ -232,6 +235,7 @@ def _write_home_cache(candidates: dict[str, pd.DataFrame], updated_at: str, meta
     try:
         metadata = dict(metadata)
         metadata["home_limit"] = HOME_LIMIT
+        metadata["demon_limit"] = DEMON_LIMIT
         HOME_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
         pd.to_pickle((candidates, updated_at, metadata), HOME_CACHE_PATH)
     except Exception:
@@ -244,7 +248,7 @@ def _append_recommendation_snapshot(
     metadata: dict[str, object],
 ) -> None:
     rows = []
-    for period in PERIODS:
+    for period in (*PERIODS, DEMON_PERIOD):
         frame = candidates.get(period, pd.DataFrame())
         if frame.empty:
             continue
@@ -305,7 +309,7 @@ def _read_latest_recommendation_snapshot() -> pd.DataFrame:
     latest_time = snapshot["快照时间"].dropna().astype(str).max()
     latest = snapshot[snapshot["快照时间"].astype(str) == latest_time].copy()
     latest["_period_order"] = latest.get("周期", pd.Series(dtype=str)).map(
-        {period: index for index, period in enumerate(PERIODS)}
+        {period: index for index, period in enumerate((*PERIODS, DEMON_PERIOD))}
     )
     latest["_period_order"] = pd.to_numeric(latest["_period_order"], errors="coerce").fillna(99)
     latest["_rank_order"] = pd.to_numeric(latest.get("排名", 99), errors="coerce").fillna(99)
@@ -322,7 +326,7 @@ def _start_background_home_scan() -> None:
     def refresh() -> None:
         global _HOME_SCAN_RUNNING
         try:
-            candidates, updated_at, metadata = scan_live_candidates(limit=HOME_LIMIT)
+            candidates, updated_at, metadata = scan_live_candidates(limit=HOME_LIMIT, demon_limit=DEMON_LIMIT)
             _write_home_cache(candidates, updated_at, metadata)
             _append_recommendation_snapshot(candidates, updated_at, metadata)
         except Exception as exc:  # noqa: BLE001
@@ -345,7 +349,7 @@ def _page(title: str, body: str) -> str:
   <style>{PAGE_STYLE}</style>
 </head>
 <body>
-  <header><h1>{html.escape(title)}</h1><p>固定展示短期、中期、长期各 8 只候选，并给出技术面和基本面简要分析。</p></header>
+  <header><h1>{html.escape(title)}</h1><p>固定展示短期、中期、长期各 8 只候选，另设 4 只妖股观察池，并给出技术面和基本面简要分析。</p></header>
   <main>{body}</main>
 </body>
 </html>"""
@@ -521,6 +525,15 @@ def _candidate_sections(candidates: dict[str, pd.DataFrame]) -> str:
             </section>
             """
         )
+    sections.append(
+        f"""
+        <section class="panel risk">
+          <h2>妖股观察池</h2>
+          <p class="hint">固定 4 只。这里是高风险短线情绪观察，只用于识别资金接力、换手、量比和波动强度，不代表基本面看涨，也不是买入建议。</p>
+          {_candidate_cards(candidates.get(DEMON_PERIOD, pd.DataFrame()), limit=DEMON_LIMIT)}
+        </section>
+        """
+    )
     return "\n".join(sections)
 
 

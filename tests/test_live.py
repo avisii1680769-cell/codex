@@ -569,17 +569,17 @@ def test_fetch_eastmoney_spot_uses_system_proxy_and_records_full_market_metadata
 def test_scan_live_candidates_returns_scope_metadata(monkeypatch):
     spot = pd.DataFrame(
         {
-            "代码": ["000001", "000002"],
-            "名称": ["平安银行", "万科A"],
-            "最新价": [10.0, 20.0],
-            "涨跌幅": [1.0, 2.0],
-            "成交额": [100_000_000, 200_000_000],
-            "换手率": [1.0, 2.0],
-            "量比": [1.0, 1.2],
-            "振幅": [2.0, 3.0],
-            "市盈率-动态": [6.0, 8.0],
-            "市净率": [0.8, 1.0],
-            "总市值": [100_000_000_000, 200_000_000_000],
+            "代码": ["000001", "000002", "000003", "000004", "000005"],
+            "名称": ["平安银行", "万科A", "情绪龙一", "情绪龙二", "情绪龙三"],
+            "最新价": [10.0, 20.0, 12.0, 8.0, 6.0],
+            "涨跌幅": [1.0, 2.0, 9.8, 7.5, 6.8],
+            "成交额": [100_000_000, 200_000_000, 2_000_000_000, 1_500_000_000, 900_000_000],
+            "换手率": [1.0, 2.0, 20.0, 15.0, 12.0],
+            "量比": [1.0, 1.2, 5.0, 3.5, 2.8],
+            "振幅": [2.0, 3.0, 10.0, 8.0, 7.0],
+            "市盈率-动态": [6.0, 8.0, 80.0, 60.0, 50.0],
+            "市净率": [0.8, 1.0, 6.0, 5.0, 4.0],
+            "总市值": [100_000_000_000, 200_000_000_000, 30_000_000_000, 20_000_000_000, 10_000_000_000],
         }
     )
     spot.attrs["raw_count"] = 5857
@@ -590,13 +590,17 @@ def test_scan_live_candidates_returns_scope_metadata(monkeypatch):
     monkeypatch.setattr(live, "fetch_live_spot", lambda: spot)
     monkeypatch.setattr(live, "_enrich_selected_risks", lambda candidates: candidates)
 
-    candidates, updated_at, metadata = live.scan_live_candidates(limit=1)
+    candidates, updated_at, metadata = live.scan_live_candidates(limit=1, demon_limit=2)
 
     assert updated_at
-    assert sum(len(frame) for frame in candidates.values()) == 3
+    assert set(candidates) == {"短期", "中期", "长期", "妖股"}
+    assert len(candidates["妖股"]) == 2
+    assert candidates["妖股"].iloc[0]["代码"] == "000003"
+    assert "高风险短线情绪观察" in candidates["妖股"].iloc[0]["综合结论"]
+    assert "1-2 个交易日" in candidates["妖股"].iloc[0]["建议持仓周期"]
     assert metadata["raw_count"] == 5857
     assert metadata["filtered_count"] == 4000
-    assert metadata["deep_analysis_count"] == 2
+    assert metadata["deep_analysis_count"] == 5
     assert metadata["scan_scope"] == "全A股实时行情"
 
 
