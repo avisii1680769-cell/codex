@@ -44,7 +44,7 @@ def test_render_home_page_is_chinese_live_scanner_without_upload_form():
     assert "短期候选" in html
     assert "中期候选" in html
     assert "长期候选" in html
-    assert "固定展示每个周期 5 只" in html
+    assert "固定展示每个周期 8 只" in html
     assert "全A股实时行情" in html
     assert "5857" in html
     assert "4000" in html
@@ -217,6 +217,7 @@ def test_home_cache_round_trips_candidates(tmp_path, monkeypatch):
     cached_candidates, updated_at, cached_metadata = cached
     assert updated_at == "2026-06-02 10:00:00"
     assert cached_metadata["scan_scope"] == "测试缓存"
+    assert cached_metadata["home_limit"] == web.HOME_LIMIT
     assert cached_candidates["短期"].iloc[0]["代码"] == "000001"
 
 
@@ -242,6 +243,24 @@ def test_home_cache_rejects_old_candidates_without_trade_plan(tmp_path, monkeypa
         )
     }
     pd.to_pickle((candidates, "2026-06-02 10:00:00", {"scan_scope": "旧缓存"}), cache_path)
+
+    assert web._read_home_cache() is None
+
+
+def test_home_cache_rejects_old_candidates_with_previous_home_limit(tmp_path, monkeypatch):
+    cache_path = tmp_path / "home_candidates.pkl"
+    monkeypatch.setattr(web, "HOME_CACHE_PATH", cache_path)
+    candidates = {
+        "短期": pd.DataFrame(
+            {
+                "代码": ["000001"],
+                "名称": ["平安银行"],
+                "追高风险": ["追高风险：低；未触发明显追高风险。"],
+                "交易计划参考": ["交易计划参考：观察价 10.00，计划买入区间 9.80-10.10。"],
+            }
+        )
+    }
+    pd.to_pickle((candidates, "2026-06-02 10:00:00", {"scan_scope": "旧缓存", "home_limit": 5}), cache_path)
 
     assert web._read_home_cache() is None
 

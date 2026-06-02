@@ -11,7 +11,7 @@ import pandas as pd
 
 from stock_bullish.live import PERIODS, analyze_stock_code, scan_live_candidates
 
-HOME_LIMIT = 5
+HOME_LIMIT = 8
 HOME_CACHE_PATH = Path("outputs/web/home_candidates.pkl")
 REVIEW_SNAPSHOT_PATH = Path("outputs/review/recommendation_snapshots.csv")
 _HOME_SCAN_LOCK = threading.Lock()
@@ -71,11 +71,11 @@ def render_home_page(
         <section class="panel">
           {_stock_query_form()}
           <div class="metrics">
-            <div class="metric"><span>展示规则</span><strong>每周期 5 只</strong></div>
+            <div class="metric"><span>展示规则</span><strong>每周期 8 只</strong></div>
             <div class="metric"><span>更新时间</span><strong>{updated}</strong></div>
             <div class="metric"><span>候选总数</span><strong>{total}</strong></div>
           </div>
-          <p class="hint">首页固定展示每个周期 5 只候选，不需要输入数量扫描。排序同时使用技术面评分和基本面评分。</p>
+          <p class="hint">首页固定展示每个周期 8 只候选，不需要输入数量扫描。排序同时使用技术面评分和基本面评分。</p>
         </section>
         {scope_html}
         <section class="panel risk">
@@ -216,6 +216,8 @@ def _read_home_cache() -> tuple[dict[str, pd.DataFrame], str, dict[str, object]]
     candidates, updated_at, metadata = cached
     if not isinstance(candidates, dict) or not isinstance(metadata, dict):
         return None
+    if metadata.get("home_limit") != HOME_LIMIT:
+        return None
     if any(
         isinstance(frame, pd.DataFrame)
         and not frame.empty
@@ -228,6 +230,8 @@ def _read_home_cache() -> tuple[dict[str, pd.DataFrame], str, dict[str, object]]
 
 def _write_home_cache(candidates: dict[str, pd.DataFrame], updated_at: str, metadata: dict[str, object]) -> None:
     try:
+        metadata = dict(metadata)
+        metadata["home_limit"] = HOME_LIMIT
         HOME_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
         pd.to_pickle((candidates, updated_at, metadata), HOME_CACHE_PATH)
     except Exception:
@@ -341,7 +345,7 @@ def _page(title: str, body: str) -> str:
   <style>{PAGE_STYLE}</style>
 </head>
 <body>
-  <header><h1>{html.escape(title)}</h1><p>固定展示短期、中期、长期各 5 只候选，并给出技术面和基本面简要分析。</p></header>
+  <header><h1>{html.escape(title)}</h1><p>固定展示短期、中期、长期各 8 只候选，并给出技术面和基本面简要分析。</p></header>
   <main>{body}</main>
 </body>
 </html>"""
