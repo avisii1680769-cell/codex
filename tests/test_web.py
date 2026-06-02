@@ -417,3 +417,67 @@ def test_render_home_page_shows_empty_review_state(tmp_path, monkeypatch):
 
     assert "每日复盘" in html
     assert "暂无复盘记录" in html
+
+
+def test_render_home_page_shows_historical_selection_stats_above_demon_pool(tmp_path, monkeypatch):
+    snapshot_path = tmp_path / "recommendation_snapshots.csv"
+    monkeypatch.setattr(web, "REVIEW_SNAPSHOT_PATH", snapshot_path)
+    pd.DataFrame(
+        [
+            {
+                "快照时间": "2026-06-01 10:00:00",
+                "周期": "短期",
+                "排名": 1,
+                "代码": "000001",
+                "名称": "成功样本",
+                "推荐快照价": 10.0,
+            },
+            {
+                "快照时间": "2026-06-02 10:00:00",
+                "周期": "短期",
+                "排名": 1,
+                "代码": "000001",
+                "名称": "成功样本",
+                "推荐快照价": 11.0,
+            },
+            {
+                "快照时间": "2026-06-01 10:00:00",
+                "周期": "妖股",
+                "排名": 1,
+                "代码": "000002",
+                "名称": "失败样本",
+                "推荐快照价": 20.0,
+            },
+            {
+                "快照时间": "2026-06-02 10:00:00",
+                "周期": "妖股",
+                "排名": 1,
+                "代码": "000002",
+                "名称": "失败样本",
+                "推荐快照价": 18.0,
+            },
+            {
+                "快照时间": "2026-06-02 10:00:00",
+                "周期": "中期",
+                "排名": 1,
+                "代码": "000003",
+                "名称": "未评估样本",
+                "推荐快照价": 8.0,
+            },
+        ]
+    ).to_csv(snapshot_path, index=False, encoding="utf-8-sig")
+
+    html = render_home_page()
+
+    assert "历史选股胜率和失败率" in html
+    assert "胜率" in html
+    assert "50.0%" in html
+    assert "失败率" in html
+    assert "成功样本 000001" in html
+    assert "失败样本 000002" in html
+    assert "基于推荐快照再次出现后的价格变化" in html
+    assert html.index("<h2>历史选股胜率和失败率</h2>") < html.index("<h2>妖股观察池</h2>")
+    history_section = html[
+        html.index("<h2>历史选股胜率和失败率</h2>") : html.index("<h2>妖股观察池</h2>")
+    ]
+    assert "未评估样本" not in history_section

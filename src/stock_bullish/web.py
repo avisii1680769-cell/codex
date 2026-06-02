@@ -515,6 +515,7 @@ def _review_panel() -> str:
 
 def _candidate_sections(candidates: dict[str, pd.DataFrame]) -> str:
     sections = []
+    sections.append(_historical_selection_panel())
     sections.append(
         f"""
         <section class="panel risk">
@@ -535,6 +536,105 @@ def _candidate_sections(candidates: dict[str, pd.DataFrame]) -> str:
             """
         )
     return "\n".join(sections)
+
+
+def _historical_selection_panel() -> str:
+    history = _read_historical_selection_stats()
+    if history.empty:
+        return """
+        <section class="panel">
+          <h2>历史选股胜率和失败率</h2>
+          <p class="hint">暂无足够历史样本。该板块只统计同一股票在推荐快照中至少出现两次的样本，后续价格不足时不强行计算胜负。</p>
+        </section>
+        """
+
+    success = history[history["结果"] == "成功"].copy()
+    failure = history[history["结果"] == "失败"].copy()
+    evaluated = len(history)
+    success_rate = len(success) / evaluated * 100 if evaluated else 0.0
+    failure_rate = len(failure) / evaluated * 100 if evaluated else 0.0
+    return f"""
+    <section class="panel">
+      <h2>历史选股胜率和失败率</h2>
+      <p class="hint">基于推荐快照再次出现后的价格变化统计：第一次快照价到最近一次快照价，上涨算成功，下跌算失败，持平或没有后续价格不纳入胜负。这不是完整历史回测。</p>
+      <div class="metrics">
+        <div class="metric"><span>已评估样本</span><strong>{evaluated}</strong></div>
+        <div class="metric"><span>胜率</span><strong>{success_rate:.1f}%</strong></div>
+        <div class="metric"><span>失败率</span><strong>{failure_rate:.1f}%</strong></div>
+      </div>
+      <div class="candidate-grid">
+        {_history_result_card("成功股票", success)}
+        {_history_result_card("失败股票", failure)}
+      </div>
+    </section>
+    """
+
+
+def _read_historical_selection_stats() -> pd.DataFrame:
+    if not REVIEW_SNAPSHOT_PATH.exists():
+        return pd.DataFrame()
+    try:
+        snapshot = pd.read_csv(REVIEW_SNAPSHOT_PATH, dtype={"代码": str})
+    except Exception:
+        return pd.DataFrame()
+    required = {"快照时间", "周期", "代码", "名称", "推荐快照价"}
+    if snapshot.empty or not required.issubset(snapshot.columns):
+        return pd.DataFrame()
+    frame = snapshot.copy()
+    frame["推荐快照价"] = pd.to_numeric(frame["推荐快照价"], errors="coerce")
+    frame = frame.dropna(subset=["快照时间", "代码", "推荐快照价"])
+    if frame.empty:
+        return pd.DataFrame()
+    frame["代码"] = frame["代码"].astype(str).str.zfill(6)
+    frame["_time"] = pd.to_datetime(frame["快照时间"], errors="coerce")
+    frame = frame.dropna(subset=["_time"]).sort_values("_time")
+    rows = []
+    for (period, code), group in frame.groupby(["周期", "代码"], sort=False):
+        if len(group) < 2:
+            continue
+        first = group.iloc[0]
+        latest = group.iloc[-1]
+        first_price = float(first["推荐快照价"])
+        latest_price = float(latest["推荐快照价"])
+        if first_price <= 0 or latest_price == first_price:
+            continue
+        change_pct = (latest_price - first_price) / first_price * 100
+        rows.append(
+            {
+                "周期": str(period),
+                "代码": str(code).zfill(6),
+                "名称": str(latest.get("名称", first.get("名称", ""))),
+                "首次快照价": first_price,
+                "最近快照价": latest_price,
+                "区间涨跌幅": change_pct,
+                "结果": "成功" if change_pct > 0 else "失败",
+            }
+        )
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows).sort_values("区间涨跌幅", ascending=False).reset_index(drop=True)
+
+
+def _history_result_card(title: str, frame: pd.DataFrame) -> str:
+    if frame.empty:
+        return f"""
+        <article class="candidate">
+          <h3>{html.escape(title)}</h3>
+          <p class="hint">暂无对应股票。</p>
+        </article>
+        """
+    items = []
+    for _, row in frame.head(12).iterrows():
+        stock = f'{row.get("名称", "")} {row.get("代码", "")}'
+        change = _fmt(row.get("区间涨跌幅"))
+        period = str(row.get("周期", ""))
+        items.append(f"<li>{html.escape(stock)} <span class=\"hint\">{html.escape(period)}，{html.escape(change)}%</span></li>")
+    return f"""
+    <article class="candidate">
+      <h3>{html.escape(title)}</h3>
+      <ul class="analysis">{"".join(items)}</ul>
+    </article>
+    """
 
 
 def _candidate_cards(frame: pd.DataFrame, limit: int = HOME_LIMIT) -> str:
