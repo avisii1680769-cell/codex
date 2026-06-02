@@ -608,7 +608,6 @@ def _trade_plan_block(row: pd.Series) -> str:
     return f"""
       <div class="detail-report">
         <h4>交易计划参考</h4>
-        <p class="analysis">{html.escape(plan)}</p>
         <div class="score-row">{field_html}</div>
         {chase_html}
       </div>

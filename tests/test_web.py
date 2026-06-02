@@ -182,6 +182,7 @@ def test_render_stock_report_page_shows_period_advice_and_report():
     assert "展开完整分析" not in html
     assert html.index("<h3>1. 平安银行 000001</h3>") < html.index("<h4>交易计划参考</h4>")
     assert html.index("<h4>交易计划参考</h4>") < html.index("<details")
+    assert "交易计划参考：观察价 10.00，计划买入区间" not in html
     assert "技术面：趋势平稳。" in html
 
 
