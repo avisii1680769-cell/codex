@@ -78,6 +78,14 @@ def test_rank_live_candidates_returns_stable_columns_for_empty_input():
         "核心看多理由",
         "核心反对理由",
         "失效条件",
+        "交易计划参考",
+        "观察价",
+        "计划买入区间",
+        "止损价",
+        "第一目标价",
+        "第二目标价",
+        "计划盈亏比",
+        "追高纪律",
         "支持证据",
         "反对证据",
         "建议持仓周期",
@@ -253,6 +261,9 @@ def test_rank_live_candidates_uses_technical_and_fundamental_scores():
     assert first_mid["综合结论"]
     assert first_mid["操作节奏"]
     assert first_mid["失效条件"]
+    assert "交易计划参考：" in first_mid["交易计划参考"]
+    assert first_mid["观察价"] > 0
+    assert "不追高" in first_mid["追高纪律"] or "允许" in first_mid["追高纪律"]
     assert first_mid["支持证据"]
     assert first_mid["反对证据"]
 
@@ -308,6 +319,43 @@ def test_chase_risk_downgrades_hot_expensive_candidates():
     assert "追高风险" in live._trading_conclusion(hot_expensive, "短期")
 
 
+def test_trade_plan_uses_price_range_and_disables_chasing_when_hot():
+    stable = pd.Series(
+        {
+            "最新价": 10.0,
+            "涨跌幅": 1.2,
+            "振幅": 3.0,
+            "换手率": 2.0,
+            "量比": 1.2,
+            "追高风险": "追高风险：低；未触发明显追高风险。",
+            "风险等级": "低",
+        }
+    )
+    hot = pd.Series(
+        {
+            "最新价": 10.0,
+            "涨跌幅": 8.0,
+            "振幅": 7.0,
+            "换手率": 18.0,
+            "量比": 5.0,
+            "追高风险": "追高风险：高；单日涨幅过高；换手或量比过热。",
+            "风险等级": "中",
+        }
+    )
+
+    stable_plan = live._trade_plan(stable, "短期")
+    hot_plan = live._trade_plan(hot, "短期")
+
+    assert stable_plan["观察价"] == 10.0
+    assert stable_plan["计划买入区间"].startswith("9.")
+    assert stable_plan["止损价"] < 10.0
+    assert stable_plan["第一目标价"] > 10.0
+    assert "允许小仓位试错" in stable_plan["追高纪律"]
+    assert "只观察" in hot_plan["计划买入区间"]
+    assert "不追高" in hot_plan["追高纪律"]
+    assert "交易计划参考：" in hot_plan["交易计划参考"]
+
+
 def test_enrich_selected_risks_adds_announcement_risk(monkeypatch):
     candidates = {
         "短期": pd.DataFrame(
@@ -316,6 +364,11 @@ def test_enrich_selected_risks_adds_announcement_risk(monkeypatch):
                 "名称": ["风险股"],
                 "周期": ["短期"],
                 "排名": [1],
+                "最新价": [10.0],
+                "涨跌幅": [8.0],
+                "振幅": [6.0],
+                "换手率": [18.0],
+                "量比": [4.0],
             }
         )
     }
@@ -327,8 +380,10 @@ def test_enrich_selected_risks_adds_announcement_risk(monkeypatch):
 
     assert "公告新闻风险" in enriched["短期"].columns
     assert "风险等级" in enriched["短期"].columns
+    assert "交易计划参考" in enriched["短期"].columns
     assert "风险词" in enriched["短期"].iloc[0]["公告新闻风险"]
     assert enriched["短期"].iloc[0]["风险等级"] == "中"
+    assert "只观察" in enriched["短期"].iloc[0]["计划买入区间"]
 
 
 def test_fetch_live_spot_tries_next_eastmoney_host_before_cache(monkeypatch):

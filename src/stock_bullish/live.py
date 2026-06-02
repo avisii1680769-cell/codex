@@ -53,6 +53,14 @@ LIVE_COLUMNS = [
     "核心看多理由",
     "核心反对理由",
     "失效条件",
+    "交易计划参考",
+    "观察价",
+    "计划买入区间",
+    "止损价",
+    "第一目标价",
+    "第二目标价",
+    "计划盈亏比",
+    "追高纪律",
     "支持证据",
     "反对证据",
     "建议持仓周期",
@@ -643,6 +651,18 @@ def _rank_period(
     result["核心看多理由"] = result["支持证据"].apply(lambda value: _compact_evidence(str(value), "核心看多理由"))
     result["核心反对理由"] = result["反对证据"].apply(lambda value: _compact_evidence(str(value), "核心反对理由"))
     result["失效条件"] = result.apply(_failure_conditions, axis=1)
+    trade_plans = result.apply(lambda row: _trade_plan(row, period), axis=1)
+    for column in [
+        "交易计划参考",
+        "观察价",
+        "计划买入区间",
+        "止损价",
+        "第一目标价",
+        "第二目标价",
+        "计划盈亏比",
+        "追高纪律",
+    ]:
+        result[column] = trade_plans.apply(lambda plan, key=column: plan[key])
     result["入选理由"] = result.apply(lambda row: _reason(row, period), axis=1)
     result = result[result["评分"] > 0].sort_values("评分", ascending=False).head(limit).copy()
     result["排名"] = range(1, len(result) + 1)
@@ -1102,6 +1122,76 @@ def _failure_conditions(row: pd.Series) -> str:
     return "失效条件：" + "；".join(conditions[:4]) + "。"
 
 
+def _trade_plan(row: pd.Series, period: str) -> dict[str, object]:
+    price = max(_row_number(row, "最新价"), 0.0)
+    if price <= 0:
+        return {
+            "交易计划参考": "交易计划参考：价格数据不可用，暂不生成交易区间。",
+            "观察价": 0.0,
+            "计划买入区间": "价格数据不可用",
+            "止损价": 0.0,
+            "第一目标价": 0.0,
+            "第二目标价": 0.0,
+            "计划盈亏比": "无法计算",
+            "追高纪律": "追高纪律：价格数据不可用，只观察。",
+        }
+
+    change_pct = _row_number(row, "涨跌幅")
+    amplitude = max(_row_number(row, "振幅"), 1.0)
+    chase_risk = str(row.get("追高风险", "")) or _chase_risk_analysis(row)
+    risk_level = str(row.get("风险等级", "待核查"))
+    high_chase = "追高风险：高" in chase_risk or risk_level == "高"
+
+    if period == "短期":
+        pullback_pct = min(max(amplitude * 0.35, 1.2), 3.5)
+        stop_pct = min(max(amplitude * 0.55, 3.0), 6.0)
+        target_one_pct = max(stop_pct * 1.25, 3.0)
+        target_two_pct = max(stop_pct * 2.0, 5.0)
+    elif period == "中期":
+        pullback_pct = min(max(amplitude * 0.55, 2.0), 5.5)
+        stop_pct = min(max(amplitude * 0.85, 5.0), 9.0)
+        target_one_pct = max(stop_pct * 1.5, 8.0)
+        target_two_pct = max(stop_pct * 2.3, 12.0)
+    else:
+        pullback_pct = min(max(amplitude * 0.80, 3.0), 8.0)
+        stop_pct = min(max(amplitude * 1.20, 8.0), 14.0)
+        target_one_pct = max(stop_pct * 1.6, 12.0)
+        target_two_pct = max(stop_pct * 2.5, 20.0)
+
+    observe = round(price, 2)
+    lower = round(price * (1 - pullback_pct / 100), 2)
+    upper = round(price * (1 + min(max(1.0 - max(change_pct, 0) * 0.08, 0.2), 1.0) / 100), 2)
+    stop = round(price * (1 - stop_pct / 100), 2)
+    target_one = round(price * (1 + target_one_pct / 100), 2)
+    target_two = round(price * (1 + target_two_pct / 100), 2)
+    reward = max(target_one - price, 0.0)
+    risk = max(price - stop, 0.01)
+    ratio = f"{reward / risk:.1f}:1"
+
+    if high_chase or change_pct >= 7:
+        buy_range = "只观察，等待回踩承接后重新评估"
+        chase_rule = "追高纪律：不追高；若高开、放量滞涨或跌破观察价，交易计划失效。"
+    else:
+        buy_range = f"{lower:.2f}-{upper:.2f}"
+        chase_rule = "追高纪律：允许小仓位试错，但必须等量价确认；不在急拉时扩大仓位。"
+
+    plan_text = (
+        f"交易计划参考：观察价 {observe:.2f}，计划买入区间 {buy_range}，"
+        f"止损价 {stop:.2f}，第一目标价 {target_one:.2f}，第二目标价 {target_two:.2f}，"
+        f"计划盈亏比 {ratio}。这是风控区间，不是价格预测。"
+    )
+    return {
+        "交易计划参考": plan_text,
+        "观察价": observe,
+        "计划买入区间": buy_range,
+        "止损价": stop,
+        "第一目标价": target_one,
+        "第二目标价": target_two,
+        "计划盈亏比": ratio,
+        "追高纪律": chase_rule,
+    }
+
+
 def _row_number(row: pd.Series, column: str) -> float:
     try:
         return float(row.get(column, 0) or 0)
@@ -1426,6 +1516,18 @@ def _enrich_selected_risks(candidates: dict[str, pd.DataFrame]) -> dict[str, pd.
         result["核心看多理由"] = result["支持证据"].apply(lambda value: _compact_evidence(str(value), "核心看多理由"))
         result["核心反对理由"] = result["反对证据"].apply(lambda value: _compact_evidence(str(value), "核心反对理由"))
         result["失效条件"] = result.apply(_failure_conditions, axis=1)
+        trade_plans = result.apply(lambda row: _trade_plan(row, period), axis=1)
+        for column in [
+            "交易计划参考",
+            "观察价",
+            "计划买入区间",
+            "止损价",
+            "第一目标价",
+            "第二目标价",
+            "计划盈亏比",
+            "追高纪律",
+        ]:
+            result[column] = trade_plans.apply(lambda plan, key=column: plan[key])
         enriched[period] = result
     return enriched
 

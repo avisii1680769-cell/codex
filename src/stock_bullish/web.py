@@ -217,7 +217,9 @@ def _read_home_cache() -> tuple[dict[str, pd.DataFrame], str, dict[str, object]]
     if not isinstance(candidates, dict) or not isinstance(metadata, dict):
         return None
     if any(
-        isinstance(frame, pd.DataFrame) and not frame.empty and "追高风险" not in frame.columns
+        isinstance(frame, pd.DataFrame)
+        and not frame.empty
+        and ("追高风险" not in frame.columns or "交易计划参考" not in frame.columns)
         for frame in candidates.values()
     ):
         return None
@@ -259,6 +261,14 @@ def _append_recommendation_snapshot(
                     "追高风险": row.get("追高风险", ""),
                     "建议持仓周期": row.get("建议持仓周期", ""),
                     "综合结论": row.get("综合结论", ""),
+                    "交易计划参考": row.get("交易计划参考", ""),
+                    "观察价": row.get("观察价", ""),
+                    "计划买入区间": row.get("计划买入区间", ""),
+                    "止损价": row.get("止损价", ""),
+                    "第一目标价": row.get("第一目标价", ""),
+                    "第二目标价": row.get("第二目标价", ""),
+                    "计划盈亏比": row.get("计划盈亏比", ""),
+                    "追高纪律": row.get("追高纪律", ""),
                     "入选理由": row.get("入选理由", ""),
                     "扫描范围": metadata.get("scan_scope", ""),
                     "数据源": metadata.get("data_source", ""),
@@ -522,6 +532,14 @@ def _candidate_cards(frame: pd.DataFrame, limit: int = HOME_LIMIT) -> str:
             "核心看多理由",
             "核心反对理由",
             "失效条件",
+            "交易计划参考",
+            "观察价",
+            "计划买入区间",
+            "止损价",
+            "第一目标价",
+            "第二目标价",
+            "计划盈亏比",
+            "追高纪律",
             "技术面分析",
             "基本面分析",
             "利润分析",

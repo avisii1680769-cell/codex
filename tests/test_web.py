@@ -142,6 +142,14 @@ def test_render_stock_report_page_shows_period_advice_and_report():
             "核心看多理由": ["看多：技术面活跃。", "看多：基本面评分靠前。", "看多：现金流较稳。"],
             "核心反对理由": ["反对：行业代理样本偏少。", "反对：暂未发现规则内的明显反对证据。", "反对：回测未校准。"],
             "失效条件": ["失效条件：放量下跌。", "失效条件：跌破关键支撑或资金转负。", "失效条件：财报质量恶化。"],
+            "交易计划参考": ["交易计划参考：观察价 10.00，计划买入区间 9.80-10.05。", "交易计划参考：观察价 10.00，计划买入区间 9.70-10.10。", "交易计划参考：观察价 10.00，计划买入区间 9.50-10.20。"],
+            "观察价": [10.0, 10.0, 10.0],
+            "计划买入区间": ["9.80-10.05", "9.70-10.10", "9.50-10.20"],
+            "止损价": [9.5, 9.2, 8.8],
+            "第一目标价": [10.6, 11.0, 12.0],
+            "第二目标价": [11.2, 12.0, 14.0],
+            "计划盈亏比": ["1.4:1", "1.6:1", "2.0:1"],
+            "追高纪律": ["追高纪律：不追高，等回踩确认。", "追高纪律：不追高，等回踩确认。", "追高纪律：不追高，等回踩确认。"],
             "入选理由": ["短线活跃", "综合评分最高", "基本面稳定"],
         }
     )
@@ -163,6 +171,9 @@ def test_render_stock_report_page_shows_period_advice_and_report():
     assert "核心看多理由" in html
     assert "核心反对理由" in html
     assert "失效条件" in html
+    assert "交易计划参考" in html
+    assert "计划买入区间" in html
+    assert "追高纪律" in html
     assert "短期分析" in html
     assert "中期分析" in html
     assert "长期分析" in html
@@ -188,6 +199,7 @@ def test_home_cache_round_trips_candidates(tmp_path, monkeypatch):
                 "名称": ["平安银行"],
                 "看涨评分": [70.0],
                 "追高风险": ["追高风险：低；未触发明显追高风险。"],
+                "交易计划参考": ["交易计划参考：观察价 10.00，计划买入区间 9.80-10.10。"],
             }
         )
     }
@@ -208,6 +220,23 @@ def test_home_cache_rejects_old_candidates_without_chase_risk(tmp_path, monkeypa
     cache_path = tmp_path / "home_candidates.pkl"
     monkeypatch.setattr(web, "HOME_CACHE_PATH", cache_path)
     candidates = {"短期": pd.DataFrame({"代码": ["000001"], "名称": ["平安银行"]})}
+    pd.to_pickle((candidates, "2026-06-02 10:00:00", {"scan_scope": "旧缓存"}), cache_path)
+
+    assert web._read_home_cache() is None
+
+
+def test_home_cache_rejects_old_candidates_without_trade_plan(tmp_path, monkeypatch):
+    cache_path = tmp_path / "home_candidates.pkl"
+    monkeypatch.setattr(web, "HOME_CACHE_PATH", cache_path)
+    candidates = {
+        "短期": pd.DataFrame(
+            {
+                "代码": ["000001"],
+                "名称": ["平安银行"],
+                "追高风险": ["追高风险：低；未触发明显追高风险。"],
+            }
+        )
+    }
     pd.to_pickle((candidates, "2026-06-02 10:00:00", {"scan_scope": "旧缓存"}), cache_path)
 
     assert web._read_home_cache() is None
@@ -249,6 +278,14 @@ def test_append_recommendation_snapshot_records_candidates(tmp_path, monkeypatch
                 "追高风险": ["追高风险：低；未触发明显追高风险。"],
                 "建议持仓周期": ["建议持仓周期：1-2 个交易日。"],
                 "综合结论": ["综合结论：短期观察。"],
+                "交易计划参考": ["交易计划参考：观察价 12.34，计划买入区间 12.00-12.45。"],
+                "观察价": [12.34],
+                "计划买入区间": ["12.00-12.45"],
+                "止损价": [11.8],
+                "第一目标价": [13.2],
+                "第二目标价": [14.0],
+                "计划盈亏比": ["1.6:1"],
+                "追高纪律": ["追高纪律：允许小仓位试错，但必须等量价确认。"],
                 "入选理由": ["价格走强、换手充分、成交额较高"],
             }
         ),
@@ -274,6 +311,10 @@ def test_append_recommendation_snapshot_records_candidates(tmp_path, monkeypatch
     assert saved.iloc[0]["代码"] == "000001"
     assert saved.iloc[0]["推荐快照价"] == 12.34
     assert saved.iloc[0]["当日涨跌幅"] == 1.2
+    assert saved.iloc[0]["交易计划参考"].startswith("交易计划参考")
+    assert saved.iloc[0]["计划买入区间"] == "12.00-12.45"
+    assert saved.iloc[0]["止损价"] == 11.8
+    assert saved.iloc[0]["追高纪律"].startswith("追高纪律")
     assert saved.iloc[0]["扫描范围"] == "全A股实时行情"
 
 
