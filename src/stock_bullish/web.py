@@ -26,6 +26,10 @@ main{padding:24px 32px;max-width:1240px;margin:0 auto}
 .score-row{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
 .score{background:#eef7f6;border:1px solid #c7e2de;border-radius:6px;padding:5px 7px;font-size:12px}
 .analysis{font-size:13px;line-height:1.5;margin:7px 0;color:#243b53}
+.summary-line{font-size:13px;line-height:1.5;margin:8px 0;color:#172026}
+.detail-report{margin-top:10px;border-top:1px solid #e6edf3;padding-top:8px}
+.detail-report summary{cursor:pointer;color:#0f766e;font-weight:700;font-size:13px}
+.detail-report[open] summary{margin-bottom:8px}
 .query-form{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
 .query-form input{min-width:220px;flex:1;border:1px solid #b8c7d3;border-radius:6px;padding:10px;font-size:14px}
 .query-form button,.link-button{border:1px solid #0f766e;background:#0f766e;color:white;border-radius:6px;padding:10px 14px;font-size:14px;text-decoration:none;cursor:pointer}
@@ -290,6 +294,41 @@ def _candidate_cards(frame: pd.DataFrame, limit: int = HOME_LIMIT) -> str:
         return '<p class="hint">暂无符合条件的数据。</p>'
     cards = []
     for _, row in frame.head(limit).iterrows():
+        detail_lines = [
+            "综合结论",
+            "操作节奏",
+            "核心看多理由",
+            "核心反对理由",
+            "失效条件",
+            "技术面分析",
+            "基本面分析",
+            "利润分析",
+            "负债分析",
+            "现金流分析",
+            "行业景气分析",
+            "公告新闻风险",
+            "应收账款风险",
+            "存货风险",
+            "商誉风险",
+            "非经常性损益分析",
+            "ROE趋势分析",
+            "多年增长分析",
+            "行业估值分位",
+            "政策周期分析",
+            "全网新闻舆情",
+            "历史回测胜率校准",
+            "机构持仓分析",
+            "北向资金分析",
+            "融资融券分析",
+            "主力资金流向",
+            "支持证据",
+            "反对证据",
+        ]
+        details = "\n".join(
+            f'<p class="analysis">{html.escape(_labeled_detail(column, str(row.get(column, ""))))}</p>'
+            for column in detail_lines
+            if str(row.get(column, "")).strip()
+        )
         cards.append(
             f"""
             <article class="candidate">
@@ -300,31 +339,12 @@ def _candidate_cards(frame: pd.DataFrame, limit: int = HOME_LIMIT) -> str:
                 <span class="score">基本面评分 {html.escape(_fmt(row.get("基本面评分")))}</span>
                 <span class="score">风险等级 {html.escape(str(row.get("风险等级", "待核查")))}</span>
               </div>
-              <p class="analysis">{html.escape(str(row.get("技术面分析", "")))}</p>
-              <p class="analysis">{html.escape(str(row.get("基本面分析", "")))}</p>
-              <p class="analysis">{html.escape(str(row.get("利润分析", "")))}</p>
-              <p class="analysis">{html.escape(str(row.get("负债分析", "")))}</p>
-              <p class="analysis">{html.escape(str(row.get("现金流分析", "")))}</p>
-              <p class="analysis">{html.escape(str(row.get("行业景气分析", "")))}</p>
-              <p class="analysis">{html.escape(str(row.get("公告新闻风险", "")))}</p>
-              <p class="analysis">{html.escape(str(row.get("应收账款风险", "")))}</p>
-              <p class="analysis">{html.escape(str(row.get("存货风险", "")))}</p>
-              <p class="analysis">{html.escape(str(row.get("商誉风险", "")))}</p>
-              <p class="analysis">{html.escape(str(row.get("非经常性损益分析", "")))}</p>
-              <p class="analysis">{html.escape(str(row.get("ROE趋势分析", "")))}</p>
-              <p class="analysis">{html.escape(str(row.get("多年增长分析", "")))}</p>
-              <p class="analysis">{html.escape(str(row.get("行业估值分位", "")))}</p>
-              <p class="analysis">{html.escape(str(row.get("政策周期分析", "")))}</p>
-              <p class="analysis">{html.escape(str(row.get("全网新闻舆情", "")))}</p>
-              <p class="analysis">{html.escape(str(row.get("历史回测胜率校准", "")))}</p>
-              <p class="analysis">{html.escape(str(row.get("机构持仓分析", "")))}</p>
-              <p class="analysis">{html.escape(str(row.get("北向资金分析", "")))}</p>
-              <p class="analysis">{html.escape(str(row.get("融资融券分析", "")))}</p>
-              <p class="analysis">{html.escape(str(row.get("主力资金流向", "")))}</p>
-              <p class="analysis">{html.escape(str(row.get("支持证据", "")))}</p>
-              <p class="analysis">{html.escape(str(row.get("反对证据", "")))}</p>
-              <p class="analysis">{html.escape(str(row.get("建议持仓周期", "")))}</p>
+              <p class="summary-line">{html.escape(str(row.get("建议持仓周期", "")))}</p>
               <p class="hint">{html.escape(str(row.get("入选理由", "")))}</p>
+              <details class="detail-report">
+                <summary>展开完整分析</summary>
+                {details}
+              </details>
             </article>
             """
         )
@@ -336,6 +356,15 @@ def _fmt(value: object) -> str:
         return f"{float(value):.1f}"
     except (TypeError, ValueError):
         return str(value)
+
+
+def _labeled_detail(label: str, value: str) -> str:
+    stripped = value.strip()
+    if not stripped:
+        return ""
+    if stripped.startswith(label) or stripped.startswith(label.replace("核心", "")):
+        return stripped
+    return f"{label}：{stripped}"
 
 
 def main() -> None:

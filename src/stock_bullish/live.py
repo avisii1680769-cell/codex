@@ -47,6 +47,11 @@ LIVE_COLUMNS = [
     "融资融券分析",
     "主力资金流向",
     "风险等级",
+    "综合结论",
+    "操作节奏",
+    "核心看多理由",
+    "核心反对理由",
+    "失效条件",
     "支持证据",
     "反对证据",
     "建议持仓周期",
@@ -402,8 +407,7 @@ def scan_live_candidates(limit: int = 5) -> tuple[dict[str, pd.DataFrame], str, 
 
 def analyze_stock_code(code: str) -> tuple[pd.DataFrame, str, dict[str, object]]:
     normalized_code = _normalize_stock_code(code)
-    spot = _fetch_tencent_spot_for_codes([normalized_code])
-    spot = _filter_a_share_universe(spot)
+    spot = _fetch_single_stock_spot(normalized_code)
     if spot.empty:
         raise ValueError(f"未查询到 {normalized_code} 的实时行情，可能不是可交易 A 股代码或行情源暂不可用。")
     enriched_spot = _enrich_financial_evidence(spot)
@@ -423,6 +427,37 @@ def analyze_stock_code(code: str) -> tuple[pd.DataFrame, str, dict[str, object]]
         "data_source": "腾讯实时行情 + 东方财富财报/公告/资金接口",
     }
     return report, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), metadata
+
+
+def _fetch_single_stock_spot(normalized_code: str) -> pd.DataFrame:
+    try:
+        spot = _filter_single_stock_universe(_fetch_tencent_spot_for_codes([normalized_code]))
+        if not spot.empty:
+            return spot
+    except Exception:
+        pass
+    try:
+        market = fetch_live_spot()
+    except Exception:
+        return pd.DataFrame()
+    if market.empty or "代码" not in market.columns:
+        return pd.DataFrame()
+    return market[market["代码"].astype(str).str.zfill(6) == normalized_code].copy().reset_index(drop=True)
+
+
+def _filter_single_stock_universe(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty or "代码" not in frame.columns:
+        return frame
+    result = frame.copy()
+    result["代码"] = result["代码"].astype(str).str.zfill(6)
+    result["名称"] = result["名称"].astype(str)
+    allowed_prefixes = ("000", "001", "002", "003", "300", "301", "600", "601", "603", "605", "688", "689")
+    is_allowed_board = result["代码"].str.startswith(allowed_prefixes)
+    is_normal_name = ~result["名称"].str.contains("ST|退", case=False, regex=True, na=False)
+    if "最新价" not in result.columns:
+        result["最新价"] = 0
+    result["最新价"] = pd.to_numeric(result["最新价"], errors="coerce").fillna(0)
+    return result[is_allowed_board & is_normal_name & (result["最新价"] > 0)].reset_index(drop=True)
 
 
 def _normalize_stock_code(code: str) -> str:
@@ -601,6 +636,11 @@ def _rank_period(
     result["支持证据"] = result.apply(_support_evidence, axis=1)
     result["反对证据"] = result.apply(_opposition_evidence, axis=1)
     result["建议持仓周期"] = result.apply(lambda row: _holding_period_advice(row, period), axis=1)
+    result["综合结论"] = result.apply(lambda row: _trading_conclusion(row, period), axis=1)
+    result["操作节奏"] = result.apply(lambda row: _operation_tempo(row, period), axis=1)
+    result["核心看多理由"] = result["支持证据"].apply(lambda value: _compact_evidence(str(value), "核心看多理由"))
+    result["核心反对理由"] = result["反对证据"].apply(lambda value: _compact_evidence(str(value), "核心反对理由"))
+    result["失效条件"] = result.apply(_failure_conditions, axis=1)
     result["入选理由"] = result.apply(lambda row: _reason(row, period), axis=1)
     result = result[result["评分"] > 0].sort_values("评分", ascending=False).head(limit).copy()
     result["排名"] = range(1, len(result) + 1)
@@ -974,6 +1014,58 @@ def _holding_period_advice(row: pd.Series, period: str) -> str:
     return "建议持仓周期：6-12 个月；仅在基本面、现金流和风险提示持续稳定时适用。"
 
 
+def _trading_conclusion(row: pd.Series, period: str) -> str:
+    score = _row_number(row, "评分")
+    risk_level = str(row.get("风险等级", "待核查"))
+    opposition = str(row.get("反对证据", ""))
+    if risk_level == "高" or score < 35:
+        return "综合结论：暂不适合操作；风险或评分没有达到当前规则的观察门槛。"
+    if risk_level == "中" or any(word in opposition for word in ("净流出", "净偿还", "减持", "偏高")):
+        return f"综合结论：{period}谨慎观察；需要先验证风险证据是否缓和。"
+    if period == "短期":
+        return "综合结论：短期观察；只按短线纪律处理，不把短线信号外推成长线逻辑。"
+    if period == "中期":
+        return "综合结论：中期观察；需要持续验证量价、财报和资金面是否同向。"
+    return "综合结论：长期观察；仅在基本面、现金流和风险提示继续稳定时成立。"
+
+
+def _operation_tempo(row: pd.Series, period: str) -> str:
+    change_pct = _row_number(row, "涨跌幅")
+    turnover = _row_number(row, "换手率")
+    volume_ratio = _row_number(row, "量比")
+    risk_level = str(row.get("风险等级", "待核查"))
+    if risk_level in {"中", "高"}:
+        return "操作节奏：只适合观察，等待公告、新闻或资金风险确认后再评估。"
+    if change_pct >= 7 or turnover >= 15 or volume_ratio >= 4:
+        return "操作节奏：不追高，等待回踩承接或次日量价确认。"
+    if period == "短期":
+        return "操作节奏：可观察短线延续，若放量转弱应快速降级。"
+    if period == "中期":
+        return "操作节奏：等突破或回踩确认，按周度复盘财报和资金变化。"
+    return "操作节奏：低频跟踪，不因单日波动改变长期判断。"
+
+
+def _compact_evidence(value: str, label: str) -> str:
+    cleaned = value.replace("支持：", "").replace("反对：", "").strip("。")
+    parts = [part.strip() for part in cleaned.split("；") if part.strip()]
+    return f"{label}：" + "；".join(parts[:3]) + "。"
+
+
+def _failure_conditions(row: pd.Series) -> str:
+    conditions = ["放量下跌或量价结构转弱", "公告/新闻风险等级升至中高"]
+    if _row_number(row, "融资净买额") >= 0:
+        conditions.append("融资资金由净买入转为连续净偿还")
+    else:
+        conditions.append("融资净偿还继续扩大")
+    if _row_number(row, "经营现金流") > 0:
+        conditions.append("后续财报现金流明显转弱")
+    elif _row_number(row, "经营现金流") < 0:
+        conditions.append("经营现金流持续为负")
+    else:
+        conditions.append("关键财报数据仍无法取得")
+    return "失效条件：" + "；".join(conditions[:4]) + "。"
+
+
 def _row_number(row: pd.Series, column: str) -> float:
     try:
         return float(row.get(column, 0) or 0)
@@ -1292,6 +1384,11 @@ def _enrich_selected_risks(candidates: dict[str, pd.DataFrame]) -> dict[str, pd.
         result["支持证据"] = result.apply(_support_evidence, axis=1)
         result["反对证据"] = result.apply(_opposition_evidence, axis=1)
         result["建议持仓周期"] = result.apply(lambda row: _holding_period_advice(row, period), axis=1)
+        result["综合结论"] = result.apply(lambda row: _trading_conclusion(row, period), axis=1)
+        result["操作节奏"] = result.apply(lambda row: _operation_tempo(row, period), axis=1)
+        result["核心看多理由"] = result["支持证据"].apply(lambda value: _compact_evidence(str(value), "核心看多理由"))
+        result["核心反对理由"] = result["反对证据"].apply(lambda value: _compact_evidence(str(value), "核心反对理由"))
+        result["失效条件"] = result.apply(_failure_conditions, axis=1)
         enriched[period] = result
     return enriched
 

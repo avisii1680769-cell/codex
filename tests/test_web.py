@@ -111,6 +111,11 @@ def test_render_stock_report_page_shows_period_advice_and_report():
             "技术面分析": ["技术面：量价配合。", "技术面：趋势平稳。", "技术面：长期波动可控。"],
             "基本面分析": ["基本面：估值未极端。", "基本面：盈利质量较好。", "基本面：现金流较稳。"],
             "建议持仓周期": ["建议持仓周期：3-5 个交易日。", "建议持仓周期：2-4 周。", "建议持仓周期：3-6 个月。"],
+            "综合结论": ["短期观察", "中期观察", "长期观察"],
+            "操作节奏": ["操作节奏：等回踩确认，不追高。", "操作节奏：可按波段观察。", "操作节奏：只适合低频跟踪。"],
+            "核心看多理由": ["看多：技术面活跃。", "看多：基本面评分靠前。", "看多：现金流较稳。"],
+            "核心反对理由": ["反对：行业代理样本偏少。", "反对：暂未发现规则内的明显反对证据。", "反对：回测未校准。"],
+            "失效条件": ["失效条件：放量下跌。", "失效条件：跌破关键支撑或资金转负。", "失效条件：财报质量恶化。"],
             "入选理由": ["短线活跃", "综合评分最高", "基本面稳定"],
         }
     )
@@ -126,9 +131,17 @@ def test_render_stock_report_page_shows_period_advice_and_report():
     assert "当前更适合观察的周期" in html
     assert "中期" in html
     assert "建议持仓周期：2-4 周" in html
+    assert "综合结论" in html
+    assert "操作节奏" in html
+    assert "核心看多理由" in html
+    assert "核心反对理由" in html
+    assert "失效条件" in html
     assert "短期分析" in html
     assert "中期分析" in html
     assert "长期分析" in html
+    assert "<details" in html
+    assert "展开完整分析" in html
+    assert "技术面：趋势平稳。" in html
 
 
 def test_render_stock_report_page_shows_query_error():

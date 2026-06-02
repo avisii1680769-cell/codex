@@ -72,6 +72,11 @@ def test_rank_live_candidates_returns_stable_columns_for_empty_input():
         "融资融券分析",
         "主力资金流向",
         "风险等级",
+        "综合结论",
+        "操作节奏",
+        "核心看多理由",
+        "核心反对理由",
+        "失效条件",
         "支持证据",
         "反对证据",
         "建议持仓周期",
@@ -108,6 +113,64 @@ def test_analyze_stock_code_returns_three_period_report_and_best_period(monkeypa
     assert metadata["query_code"] == "000001"
     assert metadata["recommended_period"] == report.sort_values("评分", ascending=False).iloc[0]["周期"]
     assert "建议持仓周期" in report.columns
+
+
+def test_analyze_stock_code_falls_back_to_full_market_source(monkeypatch):
+    market = pd.DataFrame(
+        {
+            "代码": ["000066", "000001"],
+            "名称": ["中国长城", "平安银行"],
+            "最新价": [12.0, 10.0],
+            "涨跌幅": [2.5, 1.0],
+            "成交额": [800_000_000, 300_000_000],
+            "换手率": [4.0, 1.0],
+            "量比": [1.5, 1.0],
+            "振幅": [4.0, 2.0],
+            "市盈率-动态": [32.0, 7.0],
+            "市净率": [2.5, 0.8],
+            "总市值": [80_000_000_000, 200_000_000_000],
+        }
+    )
+
+    monkeypatch.setattr(live, "_fetch_tencent_spot_for_codes", lambda codes: pd.DataFrame())
+    monkeypatch.setattr(live, "fetch_live_spot", lambda: market)
+    monkeypatch.setattr(live, "_enrich_financial_evidence", lambda frame: frame)
+    monkeypatch.setattr(live, "_enrich_selected_risks", lambda candidates: candidates)
+
+    report, _, metadata = analyze_stock_code("000066")
+
+    assert set(report["代码"]) == {"000066"}
+    assert report.iloc[0]["名称"] == "中国长城"
+    assert metadata["query_code"] == "000066"
+
+
+def test_analyze_stock_code_accepts_single_quote_with_missing_amount(monkeypatch):
+    quote = pd.DataFrame(
+        {
+            "代码": ["000066"],
+            "名称": ["中国长城"],
+            "最新价": [18.18],
+            "涨跌幅": [-1.62],
+            "成交额": [0.0],
+            "换手率": [0.0],
+            "量比": [0.0],
+            "振幅": [0.0],
+            "市盈率-动态": [2906.98],
+            "市净率": [5.36],
+            "总市值": [58_645_000_000],
+        }
+    )
+
+    monkeypatch.setattr(live, "_fetch_tencent_spot_for_codes", lambda codes: quote)
+    monkeypatch.setattr(live, "fetch_live_spot", lambda: pd.DataFrame())
+    monkeypatch.setattr(live, "_enrich_financial_evidence", lambda frame: frame)
+    monkeypatch.setattr(live, "_enrich_selected_risks", lambda candidates: candidates)
+
+    report, _, metadata = analyze_stock_code("000066")
+
+    assert set(report["代码"]) == {"000066"}
+    assert report.iloc[0]["名称"] == "中国长城"
+    assert metadata["query_code"] == "000066"
 
 
 def test_analyze_stock_code_rejects_invalid_code():
@@ -180,7 +243,15 @@ def test_rank_live_candidates_uses_technical_and_fundamental_scores():
     assert "主力资金：" in first_mid["主力资金流向"]
     assert "支持证据" in first_mid
     assert "反对证据" in first_mid
+    assert "综合结论" in first_mid
+    assert "操作节奏" in first_mid
+    assert "核心看多理由" in first_mid
+    assert "核心反对理由" in first_mid
+    assert "失效条件" in first_mid
     assert "建议持仓周期：" in first_mid["建议持仓周期"]
+    assert first_mid["综合结论"]
+    assert first_mid["操作节奏"]
+    assert first_mid["失效条件"]
     assert first_mid["支持证据"]
     assert first_mid["反对证据"]
 
