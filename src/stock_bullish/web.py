@@ -466,7 +466,10 @@ def _review_panel() -> str:
         return """
         <section class="panel">
           <h2>每日复盘</h2>
-          <p class="hint">暂无复盘记录。完成一次行情更新后，系统会记录推荐快照价和当日涨跌幅，后续补齐收盘价、次日表现后再计算真实复盘结果。</p>
+          <details class="detail-report review-detail">
+            <summary>查看每日复盘</summary>
+            <p class="hint">暂无复盘记录。完成一次行情更新后，系统会记录推荐快照价和当日涨跌幅，后续补齐收盘价、次日表现后再计算真实复盘结果。</p>
+          </details>
         </section>
         """
     latest_time = html.escape(str(snapshot.iloc[0].get("快照时间", "")))
@@ -490,25 +493,28 @@ def _review_panel() -> str:
     return f"""
     <section class="panel">
       <h2>每日复盘</h2>
-      <p class="hint">推荐快照：{latest_time}。这里只记录推荐快照价和当日涨跌幅，不把快照当成已实现收益；真实结果必须等收盘价、次日行情和持仓周期结束后再复盘。</p>
-      <div class="review-table-wrap">
-        <table class="review-table">
-          <thead>
-            <tr>
-              <th>周期</th>
-              <th>排名</th>
-              <th>股票</th>
-              <th>快照价</th>
-              <th>当日涨跌幅</th>
-              <th>看涨评分</th>
-              <th>风险</th>
-              <th>持仓建议</th>
-              <th>入选理由</th>
-            </tr>
-          </thead>
-          <tbody>{"".join(rows)}</tbody>
-        </table>
-      </div>
+      <details class="detail-report review-detail">
+        <summary>查看每日复盘</summary>
+        <p class="hint">推荐快照：{latest_time}。这里只记录推荐快照价和当日涨跌幅，不把快照当成已实现收益；真实结果必须等收盘价、次日行情和持仓周期结束后再复盘。</p>
+        <div class="review-table-wrap">
+          <table class="review-table">
+            <thead>
+              <tr>
+                <th>周期</th>
+                <th>排名</th>
+                <th>股票</th>
+                <th>快照价</th>
+                <th>当日涨跌幅</th>
+                <th>看涨评分</th>
+                <th>风险</th>
+                <th>持仓建议</th>
+                <th>入选理由</th>
+              </tr>
+            </thead>
+            <tbody>{"".join(rows)}</tbody>
+          </table>
+        </div>
+      </details>
     </section>
     """
 

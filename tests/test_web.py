@@ -403,11 +403,14 @@ def test_render_home_page_shows_review_snapshot_panel(tmp_path, monkeypatch):
     html = render_home_page()
 
     assert "每日复盘" in html
+    assert "查看每日复盘" in html
     assert "推荐快照" in html
     assert "2026-06-02 15:00:00" in html
     assert "平安银行" in html
     assert "记录推荐快照价和当日涨跌幅" in html
     assert "不把快照当成已实现收益" in html
+    assert "<details class=\"detail-report review-detail\">" in html
+    assert "<summary>查看每日复盘</summary>" in html
 
 
 def test_render_home_page_shows_empty_review_state(tmp_path, monkeypatch):
@@ -416,6 +419,7 @@ def test_render_home_page_shows_empty_review_state(tmp_path, monkeypatch):
     html = render_home_page()
 
     assert "每日复盘" in html
+    assert "查看每日复盘" in html
     assert "暂无复盘记录" in html
 
 
