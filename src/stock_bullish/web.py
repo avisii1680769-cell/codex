@@ -515,6 +515,15 @@ def _review_panel() -> str:
 
 def _candidate_sections(candidates: dict[str, pd.DataFrame]) -> str:
     sections = []
+    sections.append(
+        f"""
+        <section class="panel risk">
+          <h2>妖股观察池</h2>
+          <p class="hint">固定 4 只。这里是高风险短线情绪观察，只用于识别资金接力、换手、量比和波动强度，不代表基本面看涨，也不是买入建议。</p>
+          {_candidate_cards(candidates.get(DEMON_PERIOD, pd.DataFrame()), limit=DEMON_LIMIT)}
+        </section>
+        """
+    )
     for period in PERIODS:
         frame = candidates.get(period, pd.DataFrame())
         sections.append(
@@ -525,15 +534,6 @@ def _candidate_sections(candidates: dict[str, pd.DataFrame]) -> str:
             </section>
             """
         )
-    sections.append(
-        f"""
-        <section class="panel risk">
-          <h2>妖股观察池</h2>
-          <p class="hint">固定 4 只。这里是高风险短线情绪观察，只用于识别资金接力、换手、量比和波动强度，不代表基本面看涨，也不是买入建议。</p>
-          {_candidate_cards(candidates.get(DEMON_PERIOD, pd.DataFrame()), limit=DEMON_LIMIT)}
-        </section>
-        """
-    )
     return "\n".join(sections)
 
 

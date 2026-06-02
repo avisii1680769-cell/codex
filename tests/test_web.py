@@ -64,6 +64,7 @@ def test_render_home_page_is_chinese_live_scanner_without_upload_form():
     assert "固定 4 只" in html
     assert "高风险短线情绪观察" in html
     assert "情绪龙头" in html
+    assert html.index("<h2>妖股观察池</h2>") < html.index("<h2>短期候选</h2>")
     assert "固定展示每个周期 8 只" in html
     assert "全A股实时行情" in html
     assert "5857" in html
