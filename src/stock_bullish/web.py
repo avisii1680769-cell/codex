@@ -4,6 +4,7 @@ import html
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import threading
 from urllib.parse import parse_qs, urlparse
 
 import pandas as pd
@@ -11,6 +12,9 @@ import pandas as pd
 from stock_bullish.live import PERIODS, analyze_stock_code, scan_live_candidates
 
 HOME_LIMIT = 5
+HOME_CACHE_PATH = Path("outputs/web/home_candidates.pkl")
+_HOME_SCAN_LOCK = threading.Lock()
+_HOME_SCAN_RUNNING = False
 
 PAGE_STYLE = """
 body{margin:0;font-family:Arial,'Microsoft YaHei',sans-serif;background:#f5f7fb;color:#172026}
@@ -108,7 +112,10 @@ def serve(host: str = "127.0.0.1", port: int = 8765, output_dir: str | Path = "o
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
-            if parsed.path in {"/", "/scan"}:
+            if parsed.path == "/":
+                self._run_home_cached()
+                return
+            if parsed.path == "/scan":
                 self._run_home_scan()
                 return
             if parsed.path == "/stock":
@@ -129,7 +136,34 @@ def serve(host: str = "127.0.0.1", port: int = 8765, output_dir: str | Path = "o
             except Exception as exc:  # noqa: BLE001
                 self._send_html(render_home_page(error=str(exc)))
                 return
+            _write_home_cache(candidates, updated_at, metadata)
             self._send_html(render_home_page(candidates=candidates, updated_at=updated_at, metadata=metadata))
+
+        def _run_home_cached(self) -> None:
+            cached = _read_home_cache()
+            if cached is None:
+                metadata = {
+                    "scan_scope": "后台刷新中",
+                    "raw_count": 0,
+                    "filtered_count": 0,
+                    "deep_analysis_count": 0,
+                    "data_source": "首次打开先返回页面，行情扫描在后台执行",
+                }
+                self._send_html(
+                    render_home_page(
+                        candidates={},
+                        updated_at="后台刷新中",
+                        metadata=metadata,
+                        error="行情数据正在后台刷新，请稍后刷新页面；个股代码查询可直接使用。",
+                    )
+                )
+                _start_background_home_scan()
+                return
+            candidates, updated_at, metadata = cached
+            metadata = dict(metadata)
+            metadata["data_source"] = f"{metadata.get('data_source', '缓存候选')}；页面先展示缓存，后台自动刷新"
+            self._send_html(render_home_page(candidates=candidates, updated_at=updated_at, metadata=metadata))
+            _start_background_home_scan()
 
         def _run_stock_query(self, code: str) -> None:
             try:
@@ -148,11 +182,59 @@ def serve(host: str = "127.0.0.1", port: int = 8765, output_dir: str | Path = "o
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
-            self.wfile.write(payload)
+            try:
+                self.wfile.write(payload)
+            except (BrokenPipeError, ConnectionAbortedError):
+                return
 
     server = ThreadingHTTPServer((host, port), Handler)
     print(f"Open http://{host}:{port}")
     server.serve_forever()
+
+
+def _read_home_cache() -> tuple[dict[str, pd.DataFrame], str, dict[str, object]] | None:
+    if not HOME_CACHE_PATH.exists():
+        return None
+    try:
+        cached = pd.read_pickle(HOME_CACHE_PATH)
+    except Exception:
+        return None
+    if not isinstance(cached, tuple) or len(cached) != 3:
+        return None
+    candidates, updated_at, metadata = cached
+    if not isinstance(candidates, dict) or not isinstance(metadata, dict):
+        return None
+    return candidates, str(updated_at), metadata
+
+
+def _write_home_cache(candidates: dict[str, pd.DataFrame], updated_at: str, metadata: dict[str, object]) -> None:
+    try:
+        HOME_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        pd.to_pickle((candidates, updated_at, metadata), HOME_CACHE_PATH)
+    except Exception:
+        return
+
+
+def _start_background_home_scan() -> None:
+    global _HOME_SCAN_RUNNING
+    with _HOME_SCAN_LOCK:
+        if _HOME_SCAN_RUNNING:
+            return
+        _HOME_SCAN_RUNNING = True
+
+    def refresh() -> None:
+        global _HOME_SCAN_RUNNING
+        try:
+            candidates, updated_at, metadata = scan_live_candidates(limit=HOME_LIMIT)
+            _write_home_cache(candidates, updated_at, metadata)
+        except Exception as exc:  # noqa: BLE001
+            print(f"background home scan failed: {exc}")
+        finally:
+            with _HOME_SCAN_LOCK:
+                _HOME_SCAN_RUNNING = False
+
+    thread = threading.Thread(target=refresh, name="home-scan-refresh", daemon=True)
+    thread.start()
 
 
 def _page(title: str, body: str) -> str:

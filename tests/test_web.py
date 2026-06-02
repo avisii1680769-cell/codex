@@ -1,5 +1,8 @@
+from pathlib import Path
+
 import pandas as pd
 
+from stock_bullish import web
 from stock_bullish.web import render_home_page, render_live_result_page, render_stock_report_page
 
 
@@ -149,6 +152,31 @@ def test_render_stock_report_page_shows_query_error():
 
     assert "请输入 6 位 A 股股票代码" in html
     assert "个股代码查询" in html
+
+
+def test_home_cache_round_trips_candidates(tmp_path, monkeypatch):
+    cache_path = tmp_path / "home_candidates.pkl"
+    monkeypatch.setattr(web, "HOME_CACHE_PATH", cache_path)
+    candidates = {
+        "短期": pd.DataFrame(
+            {
+                "代码": ["000001"],
+                "名称": ["平安银行"],
+                "看涨评分": [70.0],
+            }
+        )
+    }
+    metadata = {"scan_scope": "测试缓存"}
+
+    web._write_home_cache(candidates, "2026-06-02 10:00:00", metadata)
+    cached = web._read_home_cache()
+
+    assert isinstance(cache_path, Path)
+    assert cached is not None
+    cached_candidates, updated_at, cached_metadata = cached
+    assert updated_at == "2026-06-02 10:00:00"
+    assert cached_metadata["scan_scope"] == "测试缓存"
+    assert cached_candidates["短期"].iloc[0]["代码"] == "000001"
 
 
 def test_render_home_page_marks_fallback_scope_honestly():
