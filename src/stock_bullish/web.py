@@ -532,14 +532,6 @@ def _candidate_cards(frame: pd.DataFrame, limit: int = HOME_LIMIT) -> str:
             "核心看多理由",
             "核心反对理由",
             "失效条件",
-            "交易计划参考",
-            "观察价",
-            "计划买入区间",
-            "止损价",
-            "第一目标价",
-            "第二目标价",
-            "计划盈亏比",
-            "追高纪律",
             "技术面分析",
             "基本面分析",
             "利润分析",
@@ -569,6 +561,7 @@ def _candidate_cards(frame: pd.DataFrame, limit: int = HOME_LIMIT) -> str:
             for column in detail_lines
             if str(row.get(column, "")).strip()
         )
+        trade_plan = _trade_plan_block(row)
         cards.append(
             f"""
             <article class="candidate">
@@ -582,14 +575,44 @@ def _candidate_cards(frame: pd.DataFrame, limit: int = HOME_LIMIT) -> str:
               <p class="summary-line">{html.escape(str(row.get("建议持仓周期", "")))}</p>
               <p class="summary-line">{html.escape(str(row.get("追高风险", "")))}</p>
               <p class="hint">{html.escape(str(row.get("入选理由", "")))}</p>
+              {trade_plan}
               <details class="detail-report">
-                <summary>展开完整分析</summary>
+                <summary>查看完整分析</summary>
                 {details}
               </details>
             </article>
             """
         )
     return '<div class="candidate-grid">' + "\n".join(cards) + "</div>"
+
+
+def _trade_plan_block(row: pd.Series) -> str:
+    plan = str(row.get("交易计划参考", "")).strip()
+    if not plan:
+        return ""
+    fields = [
+        ("观察价", _fmt(row.get("观察价"))),
+        ("计划买入区间", str(row.get("计划买入区间", "")).strip()),
+        ("止损价", _fmt(row.get("止损价"))),
+        ("第一目标价", _fmt(row.get("第一目标价"))),
+        ("第二目标价", _fmt(row.get("第二目标价"))),
+        ("计划盈亏比", str(row.get("计划盈亏比", "")).strip()),
+    ]
+    field_html = "".join(
+        f'<span class="score">{html.escape(label)} {html.escape(value)}</span>'
+        for label, value in fields
+        if value
+    )
+    chase_rule = str(row.get("追高纪律", "")).strip()
+    chase_html = f'<p class="analysis">{html.escape(chase_rule)}</p>' if chase_rule else ""
+    return f"""
+      <div class="detail-report">
+        <h4>交易计划参考</h4>
+        <p class="analysis">{html.escape(plan)}</p>
+        <div class="score-row">{field_html}</div>
+        {chase_html}
+      </div>
+    """
 
 
 def _fmt(value: object) -> str:
