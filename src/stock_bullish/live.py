@@ -47,6 +47,7 @@ LIVE_COLUMNS = [
     "融资融券分析",
     "主力资金流向",
     "风险等级",
+    "追高风险",
     "综合结论",
     "操作节奏",
     "核心看多理由",
@@ -633,6 +634,7 @@ def _rank_period(
         result["公告新闻风险"] = "公告/新闻风险：等待近期公告抓取。"
     if "风险等级" not in result.columns:
         result["风险等级"] = "待核查"
+    result["追高风险"] = result.apply(_chase_risk_analysis, axis=1)
     result["支持证据"] = result.apply(_support_evidence, axis=1)
     result["反对证据"] = result.apply(_opposition_evidence, axis=1)
     result["建议持仓周期"] = result.apply(lambda row: _holding_period_advice(row, period), axis=1)
@@ -1014,10 +1016,41 @@ def _holding_period_advice(row: pd.Series, period: str) -> str:
     return "建议持仓周期：6-12 个月；仅在基本面、现金流和风险提示持续稳定时适用。"
 
 
+def _chase_risk_analysis(row: pd.Series) -> str:
+    risk_points = []
+    change_pct = _row_number(row, "涨跌幅")
+    turnover = _row_number(row, "换手率")
+    volume_ratio = _row_number(row, "量比")
+    pe = _row_number(row, "市盈率-动态")
+    pb = _row_number(row, "市净率")
+    risk_level = str(row.get("风险等级", "待核查"))
+    opposition = str(row.get("反对证据", ""))
+    if change_pct >= 7:
+        risk_points.append("涨幅偏高")
+    if turnover >= 12 or volume_ratio >= 3:
+        risk_points.append("换手或量比过热")
+    if pe >= 80 or pb >= 8:
+        risk_points.append("估值偏高")
+    if risk_level in {"中", "高"}:
+        risk_points.append("公告/新闻风险未完全消化")
+    if any(word in opposition for word in ("净偿还", "减持", "净流出", "偏高")):
+        risk_points.append("资金或基本面存在分歧")
+    if len(risk_points) >= 4:
+        level = "高"
+    elif len(risk_points) >= 2:
+        level = "中"
+    else:
+        level = "低"
+    return "追高风险：" + level + ("；" + "；".join(risk_points[:4]) if risk_points else "；未触发明显追高风险") + "。"
+
+
 def _trading_conclusion(row: pd.Series, period: str) -> str:
     score = _row_number(row, "评分")
     risk_level = str(row.get("风险等级", "待核查"))
     opposition = str(row.get("反对证据", ""))
+    chase_risk = str(row.get("追高风险", "")) or _chase_risk_analysis(row)
+    if "追高风险：高" in chase_risk:
+        return f"综合结论：{period}只观察；追高风险较高，不能把强势信号当成直接介入理由。"
     if risk_level == "高" or score < 35:
         return "综合结论：暂不适合操作；风险或评分没有达到当前规则的观察门槛。"
     if risk_level == "中" or any(word in opposition for word in ("净流出", "净偿还", "减持", "偏高")):
@@ -1034,6 +1067,9 @@ def _operation_tempo(row: pd.Series, period: str) -> str:
     turnover = _row_number(row, "换手率")
     volume_ratio = _row_number(row, "量比")
     risk_level = str(row.get("风险等级", "待核查"))
+    chase_risk = str(row.get("追高风险", "")) or _chase_risk_analysis(row)
+    if "追高风险：高" in chase_risk:
+        return "操作节奏：只适合观察，不追高；等待回踩承接、风险公告消化和资金分歧缓和。"
     if risk_level in {"中", "高"}:
         return "操作节奏：只适合观察，等待公告、新闻或资金风险确认后再评估。"
     if change_pct >= 7 or turnover >= 15 or volume_ratio >= 4:
@@ -1381,6 +1417,7 @@ def _enrich_selected_risks(candidates: dict[str, pd.DataFrame]) -> dict[str, pd.
         risk = result["代码"].astype(str).apply(_announcement_risk_analysis)
         result["公告新闻风险"] = risk.apply(lambda item: item[0])
         result["风险等级"] = risk.apply(lambda item: item[1])
+        result["追高风险"] = result.apply(_chase_risk_analysis, axis=1)
         result["支持证据"] = result.apply(_support_evidence, axis=1)
         result["反对证据"] = result.apply(_opposition_evidence, axis=1)
         result["建议持仓周期"] = result.apply(lambda row: _holding_period_advice(row, period), axis=1)

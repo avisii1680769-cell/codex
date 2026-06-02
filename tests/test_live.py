@@ -72,6 +72,7 @@ def test_rank_live_candidates_returns_stable_columns_for_empty_input():
         "融资融券分析",
         "主力资金流向",
         "风险等级",
+        "追高风险",
         "综合结论",
         "操作节奏",
         "核心看多理由",
@@ -285,6 +286,26 @@ def test_holding_period_advice_varies_by_period_and_risk():
     assert "1-2 个交易日" in live._holding_period_advice(hot_risky, "短期")
     assert "4-6 周" in live._holding_period_advice(stable, "中期")
     assert "6-12 个月" in live._holding_period_advice(stable, "长期")
+
+
+def test_chase_risk_downgrades_hot_expensive_candidates():
+    hot_expensive = pd.Series(
+        {
+            "涨跌幅": 8.5,
+            "换手率": 18.0,
+            "量比": 3.8,
+            "市盈率-动态": 180.0,
+            "市净率": 12.0,
+            "风险等级": "中",
+            "反对证据": "反对：融资资金净偿还；互联互通持仓减持。",
+            "融资净买额": -1_000_000,
+            "互联互通增持股数": -100_000,
+        }
+    )
+
+    assert "高" in live._chase_risk_analysis(hot_expensive)
+    assert "只适合观察" in live._operation_tempo(hot_expensive, "短期")
+    assert "追高风险" in live._trading_conclusion(hot_expensive, "短期")
 
 
 def test_enrich_selected_risks_adds_announcement_risk(monkeypatch):

@@ -208,6 +208,11 @@ def _read_home_cache() -> tuple[dict[str, pd.DataFrame], str, dict[str, object]]
     candidates, updated_at, metadata = cached
     if not isinstance(candidates, dict) or not isinstance(metadata, dict):
         return None
+    if any(
+        isinstance(frame, pd.DataFrame) and not frame.empty and "追高风险" not in frame.columns
+        for frame in candidates.values()
+    ):
+        return None
     return candidates, str(updated_at), metadata
 
 
@@ -383,6 +388,7 @@ def _candidate_cards(frame: pd.DataFrame, limit: int = HOME_LIMIT) -> str:
     cards = []
     for _, row in frame.head(limit).iterrows():
         detail_lines = [
+            "追高风险",
             "综合结论",
             "操作节奏",
             "核心看多理由",
@@ -428,6 +434,7 @@ def _candidate_cards(frame: pd.DataFrame, limit: int = HOME_LIMIT) -> str:
                 <span class="score">风险等级 {html.escape(str(row.get("风险等级", "待核查")))}</span>
               </div>
               <p class="summary-line">{html.escape(str(row.get("建议持仓周期", "")))}</p>
+              <p class="summary-line">{html.escape(str(row.get("追高风险", "")))}</p>
               <p class="hint">{html.escape(str(row.get("入选理由", "")))}</p>
               <details class="detail-report">
                 <summary>展开完整分析</summary>

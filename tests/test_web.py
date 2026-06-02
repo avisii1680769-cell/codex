@@ -133,6 +133,7 @@ def test_render_stock_report_page_shows_period_advice_and_report():
             "技术面评分": [80.0, 75.0, 60.0],
             "基本面评分": [60.0, 85.0, 90.0],
             "风险等级": ["低", "低", "低"],
+            "追高风险": ["追高风险：低；未触发明显追高风险。", "追高风险：中；换手或量比过热；资金或基本面存在分歧。", "追高风险：低；未触发明显追高风险。"],
             "技术面分析": ["技术面：量价配合。", "技术面：趋势平稳。", "技术面：长期波动可控。"],
             "基本面分析": ["基本面：估值未极端。", "基本面：盈利质量较好。", "基本面：现金流较稳。"],
             "建议持仓周期": ["建议持仓周期：3-5 个交易日。", "建议持仓周期：2-4 周。", "建议持仓周期：3-6 个月。"],
@@ -156,6 +157,7 @@ def test_render_stock_report_page_shows_period_advice_and_report():
     assert "当前更适合观察的周期" in html
     assert "中期" in html
     assert "建议持仓周期：2-4 周" in html
+    assert "追高风险：中" in html
     assert "综合结论" in html
     assert "操作节奏" in html
     assert "核心看多理由" in html
@@ -185,6 +187,7 @@ def test_home_cache_round_trips_candidates(tmp_path, monkeypatch):
                 "代码": ["000001"],
                 "名称": ["平安银行"],
                 "看涨评分": [70.0],
+                "追高风险": ["追高风险：低；未触发明显追高风险。"],
             }
         )
     }
@@ -199,6 +202,15 @@ def test_home_cache_round_trips_candidates(tmp_path, monkeypatch):
     assert updated_at == "2026-06-02 10:00:00"
     assert cached_metadata["scan_scope"] == "测试缓存"
     assert cached_candidates["短期"].iloc[0]["代码"] == "000001"
+
+
+def test_home_cache_rejects_old_candidates_without_chase_risk(tmp_path, monkeypatch):
+    cache_path = tmp_path / "home_candidates.pkl"
+    monkeypatch.setattr(web, "HOME_CACHE_PATH", cache_path)
+    candidates = {"短期": pd.DataFrame({"代码": ["000001"], "名称": ["平安银行"]})}
+    pd.to_pickle((candidates, "2026-06-02 10:00:00", {"scan_scope": "旧缓存"}), cache_path)
+
+    assert web._read_home_cache() is None
 
 
 def test_render_home_page_marks_fallback_scope_honestly():
