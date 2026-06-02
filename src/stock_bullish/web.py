@@ -136,6 +136,8 @@ def serve(host: str = "127.0.0.1", port: int = 8765, output_dir: str | Path = "o
             except Exception as exc:  # noqa: BLE001
                 self._send_html(render_home_page(error=str(exc)))
                 return
+            metadata = dict(metadata)
+            metadata["data_state"] = "最新扫描完成"
             _write_home_cache(candidates, updated_at, metadata)
             self._send_html(render_home_page(candidates=candidates, updated_at=updated_at, metadata=metadata))
 
@@ -148,6 +150,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765, output_dir: str | Path = "o
                     "filtered_count": 0,
                     "deep_analysis_count": 0,
                     "data_source": "首次打开先返回页面，行情扫描在后台执行",
+                    "data_state": "后台刷新中",
                 }
                 self._send_html(
                     render_home_page(
@@ -162,6 +165,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765, output_dir: str | Path = "o
             candidates, updated_at, metadata = cached
             metadata = dict(metadata)
             metadata["data_source"] = f"{metadata.get('data_source', '缓存候选')}；页面先展示缓存，后台自动刷新"
+            metadata["data_state"] = "缓存结果，后台刷新中"
             self._send_html(render_home_page(candidates=candidates, updated_at=updated_at, metadata=metadata))
             _start_background_home_scan()
 
@@ -335,6 +339,7 @@ def _scope_panel(metadata: dict[str, object] | None) -> str:
         return ""
     scope = str(metadata.get("scan_scope", "未知扫描范围"))
     data_source = str(metadata.get("data_source", "未知数据源"))
+    data_state = str(metadata.get("data_state", "未标记"))
     raw_count = html.escape(str(metadata.get("raw_count", 0)))
     filtered_count = html.escape(str(metadata.get("filtered_count", 0)))
     deep_count = html.escape(str(metadata.get("deep_analysis_count", 0)))
@@ -345,6 +350,7 @@ def _scope_panel(metadata: dict[str, object] | None) -> str:
     <section class="panel">
       <h2>扫描范围</h2>
       <div class="metrics">
+        <div class="metric"><span>当前数据状态</span><strong>{html.escape(data_state)}</strong></div>
         <div class="metric"><span>当前范围</span><strong>{html.escape(scope)}</strong></div>
         <div class="metric"><span>原始样本</span><strong>{raw_count}</strong></div>
         <div class="metric"><span>过滤后样本</span><strong>{filtered_count}</strong></div>

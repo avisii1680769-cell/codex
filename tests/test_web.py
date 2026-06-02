@@ -35,6 +35,7 @@ def test_render_home_page_is_chinese_live_scanner_without_upload_form():
             "filtered_count": 4000,
             "deep_analysis_count": 15,
             "data_source": "东方财富全市场行情",
+            "data_state": "最新扫描完成",
         },
     )
 
@@ -58,6 +59,8 @@ def test_render_home_page_is_chinese_live_scanner_without_upload_form():
     assert "已接入口径与仍未打通因素" in html
     assert "未找到足够稳定的结构化接口" in html
     assert "数据来源与覆盖范围" in html
+    assert "当前数据状态" in html
+    assert "最新扫描完成" in html
     assert "看涨概率" not in html
     assert "推荐股票" not in html
 
@@ -98,6 +101,25 @@ def test_render_home_page_contains_custom_stock_query_form():
     assert 'action="/stock"' in html
     assert 'name="code"' in html
     assert "输入股票代码" in html
+
+
+def test_render_home_page_marks_cached_or_refreshing_state():
+    html = render_home_page(
+        candidates={},
+        updated_at="后台刷新中",
+        metadata={
+            "scan_scope": "后台刷新中",
+            "raw_count": 0,
+            "filtered_count": 0,
+            "deep_analysis_count": 0,
+            "data_source": "首次打开先返回页面",
+            "data_state": "后台刷新中",
+        },
+    )
+
+    assert "当前数据状态" in html
+    assert "后台刷新中" in html
+    assert "首次打开先返回页面" in html
 
 
 def test_render_stock_report_page_shows_period_advice_and_report():
