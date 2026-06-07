@@ -1,0 +1,19 @@
+{
+  "target_follow_user": "Scottcjn",
+  "target_star_owner": "Scottcjn",
+  "rustchain_node_url": "https://50.28.86.131",
+  "claim_keywords": ["claim", "claiming", "wallet:", "github:", "stars:", "article:"],
+  "wallet_patterns": [
+    "wallet\\s*[:=]\\s*`?([A-Za-z0-9_.:-]{3,128})`?",
+    "miner_id\\s*[:=]\\s*`?([A-Za-z0-9_.:-]{3,128})`?",
+    "RTC wallet\\s*[:=]\\s*`?([A-Za-z0-9_.:-]{3,128})`?"
+  ],
+  "allowed_article_hosts": ["dev.to", "medium.com", "hashnode.com", "substack.com"],
+  "min_article_words": 400,
+  "star_payout": {
+    "rtc_per_star": 1.0,
+    "follow_required": true,
+    "max_rtc": 50
+  },
+  "duplicate_scan_comment_limit": 200
+}

@@ -1,0 +1,35 @@
+name: RustChain bounty verifier
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  verify:
+    if: >
+      contains(github.event.comment.body, 'claim') ||
+      contains(github.event.comment.body, 'Claim') ||
+      contains(github.event.comment.body, 'Wallet:') ||
+      contains(github.event.comment.body, 'wallet:')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify bounty claim
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUSTCHAIN_NODE_URL: ${{ vars.RUSTCHAIN_NODE_URL || 'https://50.28.86.131' }}
+        run: |
+          python rustchain-bounty-verifier/verifier.py \
+            --repo "${{ github.repository }}" \
+            --issue "${{ github.event.issue.number }}" \
+            --comment-id "${{ github.event.comment.id }}" \
+            --comment-author "${{ github.event.comment.user.login }}" \
+            --comment-body-file "$GITHUB_EVENT_PATH" \
+            --post-comment
