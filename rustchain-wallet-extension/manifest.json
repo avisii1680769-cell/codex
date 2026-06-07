@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "RustChain Wallet",
+  "version": "0.1.0",
+  "description": "Local-first RTC wallet for RustChain.",
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "permissions": ["storage"],
+  "host_permissions": ["https://50.28.86.131/*", "http://localhost/*", "http://127.0.0.1/*", "https://*/*"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'"
+  }
+}

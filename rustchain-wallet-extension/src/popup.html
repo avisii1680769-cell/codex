@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>RustChain Wallet</title>
+    <link rel="stylesheet" href="./popup.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>RustChain Wallet</h1>
+        <button id="lock" type="button">Lock</button>
+      </header>
+
+      <section>
+        <label>Node URL <input id="node-url" autocomplete="off"></label>
+        <label>Password <input id="password" type="password" autocomplete="current-password"></label>
+      </section>
+
+      <section>
+        <h2>Wallets</h2>
+        <div id="wallet-list"></div>
+        <p id="active-address">No wallet yet</p>
+        <label>Name <input id="wallet-name" placeholder="Main wallet"></label>
+        <button id="create-wallet" type="button">Create wallet</button>
+        <textarea id="mnemonic" placeholder="Paste a 24-word seed phrase to import"></textarea>
+        <button id="import-wallet" type="button">Import seed phrase</button>
+      </section>
+
+      <section>
+        <h2>Balance</h2>
+        <button id="refresh" type="button">Refresh</button>
+        <pre id="balance">-</pre>
+        <pre id="history">[]</pre>
+      </section>
+
+      <section>
+        <h2>Send RTC</h2>
+        <label>To <input id="to-address" placeholder="RTC..."></label>
+        <label>Amount <input id="amount" type="number" min="0" step="0.000001"></label>
+        <label>Memo <input id="memo"></label>
+        <button id="send" type="button">Sign and send</button>
+      </section>
+
+      <p id="status" role="status"></p>
+    </main>
+    <script type="module" src="./popup.js"></script>
+  </body>
+</html>
