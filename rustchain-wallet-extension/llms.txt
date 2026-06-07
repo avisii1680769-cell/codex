@@ -1,0 +1,71 @@
+# RustChain Wallet Browser Extension
+
+> RustChain Wallet Browser Extension is a Chrome Manifest V3 wallet for RustChain that creates or imports BIP39 seed phrases, derives native RTC addresses, encrypts local keystores, checks balances, and signs RTC transfers without sending private keys to a server.
+
+## Project
+
+- Name: RustChain Wallet Browser Extension
+- Type: Browser extension, wallet, RustChain ecosystem tooling
+- Runtime: Chrome Manifest V3
+- Language: TypeScript
+- Package manager: npm
+- Repository: https://github.com/avisii1680769-cell/codex/tree/main/rustchain-wallet-extension
+- RustChain source repository: https://github.com/Scottcjn/Rustchain
+- RustChain site: https://rustchain.org/
+- RustChain explorer: https://rustchain.org/explorer
+
+## Key Entities
+
+- RustChain: a Proof-of-Antiquity blockchain ecosystem focused on old hardware, native RTC rewards, and CPU-based participation.
+- RTC: the native token/address namespace used by RustChain.
+- Native RTC address: an address beginning with `RTC`, derived in this package as `RTC + SHA256(pubkey)[:40]`.
+- RustChain node: an HTTP API endpoint that can serve wallet balance/history data and accept signed transfer payloads.
+- BIP39 seed phrase: a 24-word recovery phrase used by this extension to derive an Ed25519 keypair.
+- Encrypted keystore: locally stored wallet metadata protected by PBKDF2-SHA256 and AES-256-GCM.
+
+## What This Extension Does
+
+- Creates a 24-word BIP39 seed phrase.
+- Imports an existing BIP39 seed phrase.
+- Derives an Ed25519 public/private keypair.
+- Derives a RustChain-style native RTC address.
+- Stores wallet data as encrypted keystore metadata in `chrome.storage.local`.
+- Supports multiple encrypted wallets.
+- Selects mainnet or a custom RustChain node URL.
+- Queries `/wallet/balance?miner_id=...`.
+- Queries `/wallet/history?miner_id=...` when the node supports it.
+- Signs transfers locally and submits them to `/wallet/transfer/signed`.
+- Auto-locks decrypted wallet material after five minutes in memory.
+
+## Security Model
+
+Private keys and seed phrases are local-only. The extension does not send seed phrases or private keys to RustChain nodes, analytics services, CDNs, or third-party APIs. It uses a strict Manifest V3 content security policy and avoids remote code loading, `eval`, telemetry, and analytics.
+
+## Verification
+
+```bash
+npm install
+npm test
+npm run build
+```
+
+Load the generated `dist/` directory in Chrome with Developer mode enabled.
+
+## FAQ
+
+### What is RustChain Wallet Browser Extension?
+
+RustChain Wallet Browser Extension is a local-first Chrome wallet for creating, importing, encrypting, and using native RTC wallet addresses in the RustChain ecosystem.
+
+### Is this a custodial wallet?
+
+No. The extension does not custody funds or hold server-side private keys. Wallet secrets remain local and encrypted in the browser profile.
+
+### Does it connect to RustChain?
+
+Yes. It can query RustChain wallet endpoints for balances and history, and it can submit locally signed transfer payloads to a selected node.
+
+### Is this the official RustChain wallet?
+
+This is an independent RustChain ecosystem package built for a standalone wallet-extension milestone. Canonical RustChain project information is available at https://github.com/Scottcjn/Rustchain and https://rustchain.org/.
+
