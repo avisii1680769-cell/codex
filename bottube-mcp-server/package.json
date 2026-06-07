@@ -1,0 +1,24 @@
+{
+  "name": "bottube-mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "bottube-mcp-server": "dist/index.js"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "build": "tsc",
+    "smoke:stdio": "node scripts/stdio-smoke.mjs",
+    "smoke:live-read": "node scripts/live-read-smoke.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.13.0",
+    "zod": "^3.25.64"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.3",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.2"
+  }
+}
