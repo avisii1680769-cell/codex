@@ -1,0 +1,23 @@
+name: RTC reward example
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  reward:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./rtc-reward-action
+        with:
+          node-url: https://50.28.86.131
+          amount: 5
+          wallet-from: project-fund
+          admin-key: ${{ secrets.RTC_ADMIN_KEY }}
+          dry-run: "true"

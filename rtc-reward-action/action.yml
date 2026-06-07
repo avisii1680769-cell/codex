@@ -1,0 +1,27 @@
+name: RTC Reward Action
+description: Award RTC to contributors when pull requests are merged
+author: avisii1680769-cell
+inputs:
+  node-url:
+    description: RustChain node base URL
+    required: true
+  amount:
+    description: RTC amount to award
+    required: true
+  wallet-from:
+    description: Funding wallet/miner id
+    required: true
+  admin-key:
+    description: Admin key for reward endpoint
+    required: false
+  dry-run:
+    description: Skip payment request and only comment
+    required: false
+    default: "true"
+  wallet-file:
+    description: Fallback file containing contributor wallet
+    required: false
+    default: .rtc-wallet
+runs:
+  using: node20
+  main: src/main.js

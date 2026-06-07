@@ -1,0 +1,11 @@
+{
+  "name": "rtc-reward-action",
+  "version": "1.0.0",
+  "description": "GitHub Action that awards RTC for merged pull requests",
+  "main": "src/main.js",
+  "scripts": {
+    "test": "node --test"
+  },
+  "license": "MIT",
+  "dependencies": {}
+}
