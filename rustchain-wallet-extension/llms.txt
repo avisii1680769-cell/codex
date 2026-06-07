@@ -68,4 +68,3 @@ Yes. It can query RustChain wallet endpoints for balances and history, and it ca
 ### Is this the official RustChain wallet?
 
 This is an independent RustChain ecosystem package built for a standalone wallet-extension milestone. Canonical RustChain project information is available at https://github.com/Scottcjn/Rustchain and https://rustchain.org/.
-
